@@ -236,6 +236,10 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       }>
 
       const taskFiles: TaskFileData[] = []
+      
+      // ユーザー名のバリエーションを取得
+      const nameVariations = await this.getUserNameVariations(userName)
+      console.log(`[DEBUG] Searching GitHub for user variations:`, nameVariations)
 
       // .mdファイルのみを処理
       for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
@@ -247,9 +251,15 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
             }
           })
           const content = await fileResponse.text()
-          const parsedData = this.parseAllUsersTaskFile(file.name, content)
-          if (parsedData) {
-            taskFiles.push(parsedData)
+          
+          // 各名前バリエーションで検索
+          for (const nameVariation of nameVariations) {
+            const parsedData = this.parseTaskFile(file.name, content, nameVariation)
+            if (parsedData) {
+              console.log(`[DEBUG] Found tasks for ${nameVariation} in ${file.name}`)
+              taskFiles.push(parsedData)
+              break // 見つかったら他のバリエーションは試さない
+            }
           }
         } catch (error) {
           console.error(`Error reading file ${file.name}:`, error)
@@ -288,6 +298,12 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         }
         if (user.name && !variations.includes(user.name)) {
           variations.push(user.name)
+        }
+        
+        // @username形式も追加（過去のデータとの互換性のため）
+        const atUsername = `@${user.name}`
+        if (!variations.includes(atUsername)) {
+          variations.push(atUsername)
         }
       }
       
