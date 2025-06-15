@@ -1153,7 +1153,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
           text: event.text?.substring(0, 100) + '...',
           timestamp: event.ts,
           hasBot: event.user?.startsWith('B'),
-          isBot: !event.user || event.user.startsWith('B')
+          isBot: !event.user || event.user.startsWith('B') || event.user.startsWith('U091UQ2ATPB') // NOROSHI-AI bot
         })
         
         // #generalチャンネルと#タスクチャンネルのメッセージを処理
@@ -1165,7 +1165,8 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
           })
           
           // ボット自身のメッセージは無視（無限ループ防止）
-          if (event.user && !event.user.startsWith('B')) {
+          // NOROSHI-AI bot (U091UQ2ATPB) のメッセージも無視
+          if (event.user && !event.user.startsWith('B') && event.user !== 'U091UQ2ATPB') {
             console.log('✅ Human user message, processing...', {
               userId: event.user,
               channel: event.channel
@@ -1180,7 +1181,8 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
             console.log('⚠️ Bot message ignored to prevent infinite loop:', {
               user: event.user,
               channel: event.channel,
-              textPreview: event.text?.substring(0, 50) + '...'
+              textPreview: event.text?.substring(0, 50) + '...',
+              reason: event.user?.startsWith('B') ? 'Slack bot' : event.user === 'U091UQ2ATPB' ? 'NOROSHI-AI bot' : 'No user ID'
             })
           }
         } else {
