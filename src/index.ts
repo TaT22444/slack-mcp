@@ -240,18 +240,24 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     }
 
     try {
-      // キャッシュバスター用のタイムスタンプ
+      // 強力なキャッシュバスター用のタイムスタンプ + ランダム値
       const timestamp = Date.now()
+      const random = Math.random().toString(36).substring(7)
+      const cacheBuster = `${timestamp}_${random}`
+      
+      console.log(`[DEBUG] Fetching GitHub files with cache buster: ${cacheBuster}`)
       
       // タスクフォルダーの内容を取得
       const response = await fetch(
-        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${timestamp}`,
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${cacheBuster}`,
         {
           headers: {
             'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'NOROSHI-MCP-Server',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
           }
         }
       )
@@ -275,19 +281,23 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       // .mdファイルのみを処理
       for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
         try {
-          // ファイル内容取得時にもキャッシュバスターを追加
-          const fileResponse = await fetch(`${file.download_url}?t=${timestamp}`, {
+          // ファイル内容取得時にも強力なキャッシュバスターを追加
+          const fileResponse = await fetch(`${file.download_url}?t=${cacheBuster}`, {
             headers: {
-              'Cache-Control': 'no-cache'
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
             }
           })
           const content = await fileResponse.text()
+          
+          console.log(`[DEBUG] File ${file.name} content length: ${content.length}`)
           
           // 各名前バリエーションで検索
           for (const nameVariation of nameVariations) {
             const parsedData = this.parseTaskFile(file.name, content, nameVariation)
             if (parsedData) {
-              console.log(`[DEBUG] Found tasks for ${nameVariation} in ${file.name}`)
+              console.log(`[DEBUG] Found tasks for ${nameVariation} in ${file.name}: ${JSON.stringify(parsedData.users[0].tasks)}`)
               taskFiles.push(parsedData)
               break // 見つかったら他のバリエーションは試さない
             }
