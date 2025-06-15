@@ -84,7 +84,10 @@ interface SlackEventPayload {
 }
 
 export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
-  
+  constructor(ctx: ExecutionContext, env: Env) {
+    super(ctx, env)
+  }
+
   /**
    * Slackチャンネル一覧を取得します
    * @returns {Promise<string>} チャンネル一覧のJSON文字列
@@ -463,6 +466,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       /<@([A-Z0-9]+)>\s*のタスク状況/i,
       /<@([A-Z0-9]+)>\s*タスク教えて/i,
       /<@([A-Z0-9]+)>\s*のタスク/i,
+      
     ]
     
     const textPatterns = [
@@ -808,6 +812,273 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
   }
 
   /**
+   * Cron Triggerハンドラー - 定期的なタスク報告
+   */
+  async scheduled(controller: ScheduledController): Promise<void> {
+    const now = new Date()
+    const hour = now.getUTCHours() + 9 // JST変換 (UTC+9)
+    const minute = now.getUTCMinutes()
+    
+    try {
+      let reportType = ''
+      let reportMessage = ''
+      
+      // 時間帯に応じた報告タイプを設定
+      if (hour === 9) {
+        reportType = '朝のタスク状況'
+        reportMessage = '🌅 **本日のタスク状況をお知らせします**'
+      } else if (hour === 13) {
+        reportType = '昼のタスク状況'
+        reportMessage = '🍽️ **現在のタスク進捗状況をお知らせします**'
+      } else if (hour === 15 && minute === 30) {
+        reportType = '午後のタスク状況'
+        reportMessage = '☕ **午後のタスク進捗状況をお知らせします**'
+      } else if (hour === 17) {
+        reportType = '夕方のタスク状況'
+        reportMessage = '🌆 **本日のタスク完了状況をお知らせします**'
+      }
+      
+      if (reportMessage) {
+        // 全ユーザーのタスクを取得・報告
+        await this.reportAllUserTasks(reportMessage, reportType)
+        
+        console.log(`✅ ${reportType}を自動報告しました`)
+      }
+    } catch (error) {
+      console.error('Cron trigger error:', error)
+    }
+  }
+
+  /**
+   * 全ユーザーのタスクを取得してSlackに報告
+   */
+  private async reportAllUserTasks(headerMessage: string, reportType: string): Promise<void> {
+    try {
+      // GitHubから最新のタスクファイルを取得
+      const allTaskData = await this.getAllUsersTasksFromGitHub()
+      
+      if (allTaskData.length === 0) {
+        await this.sendTaskReport(`${headerMessage}\n\n📋 本日のタスクファイルが見つかりませんでした。`, reportType)
+        return
+      }
+      
+      // 報告メッセージを構築
+      let reportContent = `${headerMessage}\n\n`
+      
+      const latestTaskFile = allTaskData[0] // 最新のファイル
+      reportContent += `📅 **日付**: ${latestTaskFile.date}\n`
+      reportContent += `📄 **ファイル**: ${latestTaskFile.fileName}\n\n`
+      
+      if (latestTaskFile.users.length === 0) {
+        reportContent += '📋 登録されているタスクはありません。\n'
+      } else {
+        reportContent += `👥 **登録ユーザー数**: ${latestTaskFile.users.length}名\n\n`
+        
+        // 各ユーザーのタスクを報告
+        for (const user of latestTaskFile.users) {
+          reportContent += `## 👤 ${user.userName}\n`
+          reportContent += `📊 **タスク数**: ${user.tasks.length}件\n`
+          
+          if (user.lastUpdated) {
+            reportContent += `⏰ **最終更新**: ${user.lastUpdated}\n`
+          }
+          
+          if (user.tasks.length > 0) {
+            reportContent += `📝 **タスク一覧**:\n`
+            user.tasks.forEach((task, index) => {
+              reportContent += `${index + 1}. ${task}\n`
+            })
+          } else {
+            reportContent += `📝 **タスク**: なし\n`
+          }
+          
+          reportContent += '\n'
+        }
+      }
+      
+      reportContent += `\n⏰ ${reportType} - ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
+      reportContent += `\n💡 *データソース: GitHub タスクファイル*`
+      
+      // Slackに報告を送信
+      await this.sendTaskReport(reportContent, reportType)
+      
+    } catch (error) {
+      console.error('Error reporting all user tasks:', error)
+      await this.sendTaskReport(`${headerMessage}\n\n❌ タスク報告中にエラーが発生しました: ${error}`, reportType)
+    }
+  }
+
+  /**
+   * GitHubから全ユーザーのタスクデータを取得
+   */
+  private async getAllUsersTasksFromGitHub(): Promise<TaskFileData[]> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return []
+    }
+
+    try {
+      // タスクフォルダーの内容を取得
+      const response = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server'
+          }
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error(`GitHub API error: ${response.status}`)
+      }
+
+      const files = await response.json() as Array<{
+        name: string
+        download_url: string
+        type: string
+      }>
+
+      const taskFiles: TaskFileData[] = []
+
+      // .mdファイルのみを処理
+      for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
+        try {
+          const fileResponse = await fetch(file.download_url)
+          const content = await fileResponse.text()
+          const parsedData = this.parseAllUsersTaskFile(file.name, content)
+          if (parsedData) {
+            taskFiles.push(parsedData)
+          }
+        } catch (error) {
+          console.error(`Error reading file ${file.name}:`, error)
+        }
+      }
+
+      return taskFiles.sort((a, b) => b.date.localeCompare(a.date)) // 日付順でソート
+    } catch (error) {
+      console.error('Error fetching from GitHub:', error)
+      return []
+    }
+  }
+
+  /**
+   * タスクファイルから全ユーザーのデータを解析
+   */
+  private parseAllUsersTaskFile(fileName: string, content: string): TaskFileData | null {
+    const lines = content.split('\n')
+    const date = fileName.match(/(\d{4}-\d{2}-\d{2})/)?.[1] || ''
+    
+    const users: Array<{
+      userName: string
+      tasks: string[]
+      lastUpdated: string
+    }> = []
+    
+    let currentUser = ''
+    let currentTasks: string[] = []
+    let currentLastUpdated = ''
+    let inTaskSection = false
+    
+    for (const line of lines) {
+      // ユーザーセクションの検出
+      if (line.startsWith('## ')) {
+        // 前のユーザーのデータを保存
+        if (currentUser && currentTasks.length > 0) {
+          users.push({
+            userName: currentUser,
+            tasks: [...currentTasks],
+            lastUpdated: currentLastUpdated
+          })
+        }
+        
+        // 新しいユーザーの開始
+        currentUser = line.replace('## ', '').trim()
+        currentTasks = []
+        currentLastUpdated = ''
+        inTaskSection = false
+      }
+      
+      // 現在のタスクセクションの検出
+      if (currentUser && line.includes('**現在のタスク:**')) {
+        inTaskSection = true
+        continue
+      }
+      
+      // 最新の変更セクションの検出
+      if (currentUser && line.includes('**最新の変更')) {
+        const match = line.match(/\(([^)]+)\)/)
+        if (match) {
+          currentLastUpdated = match[1]
+        }
+        inTaskSection = false
+        continue
+      }
+      
+      // タスクの抽出
+      if (currentUser && inTaskSection && line.startsWith('・')) {
+        currentTasks.push(line.replace('・', '').trim())
+      }
+    }
+    
+    // 最後のユーザーのデータを保存
+    if (currentUser && currentTasks.length > 0) {
+      users.push({
+        userName: currentUser,
+        tasks: [...currentTasks],
+        lastUpdated: currentLastUpdated
+      })
+    }
+    
+    return {
+      fileName,
+      date,
+      users
+    }
+  }
+
+  /**
+   * タスク報告をSlackに送信
+   */
+  private async sendTaskReport(message: string, reportType: string): Promise<void> {
+    try {
+      const blocks = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: message
+          }
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `🤖 NOROSHI 自動タスク報告 | ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
+            }
+          ]
+        }
+      ]
+
+      await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          channel: 'C02TJS8D205', // #general channel ID
+          text: `📋 ${reportType}`,
+          blocks: blocks
+        })
+      })
+    } catch (error) {
+      console.error('Error sending task report:', error)
+    }
+  }
+
+  /**
    * MCPプロトコルのハンドラー
    */
   async fetch(request: Request): Promise<Response> {
@@ -842,10 +1113,15 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       if (body.type === 'event_callback') {
         const event = body.event as SlackEvent
         
-        // #generalチャンネルのメッセージのみ処理
-        if (event.type === 'message' && event.channel === 'C02TJS8D205' && event.text) {
+        // #generalチャンネルと#タスクチャンネルのメッセージを処理
+        const targetChannels = ['C02TJS8D205', 'C091H8NUJ8L'] // #general, #タスク
+        if (event.type === 'message' && targetChannels.includes(event.channel) && event.text) {
           // ボット自身のメッセージは無視
           if (event.user && !event.user.startsWith('B')) {
+            // タスクパターンの自動転送処理
+            await this.handleTaskMessage(event.text, event.channel, event.user, event.ts)
+            
+            // タスク状況問い合わせ処理
             await this.handleTaskStatusInquiry(event.text, event.channel, event.ts)
           }
         }
@@ -951,6 +1227,15 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
                   properties: {},
                   required: []
                 }
+              },
+              {
+                name: 'testScheduledTask',
+                description: 'scheduled関数をテスト実行します',
+                inputSchema: {
+                  type: 'object',
+                  properties: {},
+                  required: []
+                }
               }
             ]
           }
@@ -1050,6 +1335,24 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
               }
               break
 
+            case 'testScheduledTask':
+              // ScheduledControllerのモックを作成
+              const mockController = {
+                scheduledTime: Date.now(),
+                cron: '0 9 * * 1-5'
+              } as ScheduledController
+              
+              await this.scheduled(mockController)
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: 'scheduled関数が正常に実行されました。Slackチャンネルを確認してください。'
+                  }
+                ]
+              }
+              break
+
             default:
               return this.createErrorResponse(mcpRequest.id, -32601, `Unknown tool: ${toolName}`)
           }
@@ -1106,5 +1409,360 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         'Access-Control-Allow-Origin': '*',
       },
     })
+  }
+
+  /**
+   * タスクメッセージの自動転送処理
+   */
+  private async handleTaskMessage(text: string, channel: string, userId: string, messageTs: string): Promise<void> {
+    // タスクパターンの正規表現
+    const taskPatterns = [
+      /\[タスク\]/i,
+      /\[本日のタスク\]/i,
+      /\[今日のタスク\]/i,
+      /\[task\]/i,
+      /\[todo\]/i,
+      /\[やること\]/i
+    ]
+    
+    // タスクパターンをチェック
+    const isTaskMessage = taskPatterns.some(pattern => pattern.test(text))
+    
+    if (!isTaskMessage) return
+    
+    // #generalチャンネルのメッセージは無視（無限ループ防止）
+    if (channel === 'C02TJS8D205') return
+    
+    try {
+      // ユーザー情報を取得
+      const userName = await this.getUserNameById(userId) || 'Unknown User'
+      
+      // チャンネル情報を取得
+      const channelName = this.getChannelNameFromId(channel)
+      
+      // GitHubファイルに保存
+      let saveResult = ''
+      try {
+        saveResult = await this.saveTaskToGitHub(userName, text, messageTs)
+      } catch (error) {
+        console.error('Error saving to GitHub:', error)
+        saveResult = '⚠️ GitHub保存エラー'
+      }
+      
+      // #generalに転送メッセージを投稿
+      const forwardMessage = `📋 *${userName}さんのタスク* (#${channelName}より自動転送)\n\n${text}\n\n${saveResult}`
+      
+      await this.postTaskForwardMessage(forwardMessage, channel, messageTs)
+      
+      // 元のメッセージにリアクションを追加
+      await this.addReaction(channel, messageTs, 'white_check_mark')
+      
+      console.log(`✅ Task message forwarded from #${channelName} to #general and saved to GitHub`)
+    } catch (error) {
+      console.error('Error handling task message:', error)
+    }
+  }
+
+  /**
+   * タスクをGitHubファイルに保存
+   */
+  private async saveTaskToGitHub(userName: string, messageText: string, timestamp: string): Promise<string> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return '💡 *GitHub連携未設定*'
+    }
+
+    try {
+      const now = new Date(parseFloat(timestamp) * 1000)
+      const today = now.toISOString().split('T')[0] // YYYY-MM-DD
+      const dateTime = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+      const fileName = `${today}-tasks.md`
+      const filePath = `タスク/${fileName}`
+
+      // 新しいタスクリストを解析
+      const newTasks = this.parseTaskList(messageText)
+      
+      // 既存ファイルを取得
+      let existingContent = ''
+      let fileSha = ''
+      
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'NOROSHI-MCP-Server'
+            }
+          }
+        )
+
+        if (response.ok) {
+          const fileData = await response.json() as { content: string, sha: string }
+          existingContent = atob(fileData.content)
+          fileSha = fileData.sha
+        }
+      } catch (error) {
+        // ファイルが存在しない場合は新規作成
+      }
+
+      // 既存のユーザータスクを取得
+      const previousTasks = this.getUserPreviousTasksFromContent(userName, existingContent)
+      
+      // タスクの差分を計算
+      const diff = this.calculateTaskDiff(previousTasks, newTasks)
+      
+      // 新しいコンテンツを生成
+      const newContent = this.generateUpdatedTaskContent(existingContent, userName, newTasks, diff, dateTime, today)
+      
+      // GitHubにファイルを更新/作成
+      const updateResponse = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `📋 ${userName}のタスク更新 (${dateTime})`,
+            content: btoa(newContent),
+            sha: fileSha || undefined
+          })
+        }
+      )
+
+      if (!updateResponse.ok) {
+        throw new Error(`GitHub API error: ${updateResponse.status}`)
+      }
+
+      // 差分情報を生成
+      let changeInfo = ''
+      if (diff.added.length > 0 || diff.removed.length > 0) {
+        changeInfo = `📊 *変更内容:*`
+        if (diff.added.length > 0) {
+          changeInfo += ` 🆕追加${diff.added.length}件`
+        }
+        if (diff.removed.length > 0) {
+          changeInfo += ` 🗑️削除${diff.removed.length}件`
+        }
+        if (diff.unchanged.length > 0) {
+          changeInfo += ` 🔄継続${diff.unchanged.length}件`
+        }
+      } else {
+        changeInfo = '📊 *変更内容:* 新規登録'
+      }
+
+      return `✅ *GitHub保存完了* | ${changeInfo}\n📄 ファイル: \`${fileName}\``
+    } catch (error) {
+      console.error('Error saving to GitHub:', error)
+      return `❌ *GitHub保存エラー*: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * タスクリストを解析（箇条書きを配列に変換）
+   */
+  private parseTaskList(messageText: string): string[] {
+    const lines = messageText.split('\n')
+    const tasks: string[] = []
+    
+    for (const line of lines) {
+      const trimmed = line.trim()
+      // 箇条書きパターンを検出: ・、-、*、1.、2.など
+      if (trimmed.match(/^[・\-\*]/) || trimmed.match(/^\d+\./) || trimmed.match(/^[\-\+\*]\s/)) {
+        const taskText = trimmed.replace(/^[・\-\*\d\.]+\s*/, '').trim()
+        if (taskText) {
+          tasks.push(taskText)
+        }
+      }
+    }
+    
+    return tasks
+  }
+
+  /**
+   * 既存コンテンツからユーザーの前回タスクを取得
+   */
+  private getUserPreviousTasksFromContent(userName: string, content: string): string[] {
+    if (!content) return []
+    
+    const userSectionRegex = new RegExp(`## ${userName}([\\s\\S]*?)(?=## |$)`, 'g')
+    const matches = [...content.matchAll(userSectionRegex)]
+    
+    if (matches.length === 0) return []
+    
+    // 最新のタスクセクションを取得
+    const latestSection = matches[matches.length - 1][1]
+    const tasks: string[] = []
+    
+    const lines = latestSection.split('\n')
+    let inCurrentTasks = false
+    
+    for (const line of lines) {
+      const trimmed = line.trim()
+      
+      // 現在のタスクセクションを探す
+      if (trimmed === '**現在のタスク:**') {
+        inCurrentTasks = true
+        continue
+      }
+      
+      // 他のセクションに入ったら終了
+      if (trimmed.startsWith('**') && inCurrentTasks) {
+        break
+      }
+      
+      // 現在のタスクセクション内の箇条書きを取得
+      if (inCurrentTasks && (trimmed.match(/^[・\-\*]/) || trimmed.match(/^\d+\./) || trimmed.match(/^[\-\+\*]\s/))) {
+        const taskText = trimmed.replace(/^[・\-\*\d\.]+\s*/, '').trim()
+        if (taskText) {
+          tasks.push(taskText)
+        }
+      }
+    }
+    
+    return tasks
+  }
+
+  /**
+   * タスクの差分を計算
+   */
+  private calculateTaskDiff(previousTasks: string[], newTasks: string[]): {
+    added: string[]
+    removed: string[]
+    unchanged: string[]
+  } {
+    const added = newTasks.filter(task => !previousTasks.includes(task))
+    const removed = previousTasks.filter(task => !newTasks.includes(task))
+    const unchanged = newTasks.filter(task => previousTasks.includes(task))
+    
+    return { added, removed, unchanged }
+  }
+
+  /**
+   * 更新されたタスクコンテンツを生成
+   */
+  private generateUpdatedTaskContent(
+    existingContent: string,
+    userName: string,
+    newTasks: string[],
+    diff: { added: string[], removed: string[], unchanged: string[] },
+    dateTime: string,
+    today: string
+  ): string {
+    // 既存コンテンツがない場合は新規作成
+    if (!existingContent) {
+      existingContent = `# 📅 ${today} のタスク\n\n`
+    }
+    
+    // 同じユーザーの既存エントリを削除
+    const userSectionRegex = new RegExp(`## ${userName}[\\s\\S]*?(?=## |$)`, 'g')
+    let updatedContent = existingContent.replace(userSectionRegex, '')
+    
+    // 新しいタスクエントリを作成
+    let taskEntry = `## ${userName}\n\n`
+    
+    // 現在のタスク
+    taskEntry += `**現在のタスク:**\n`
+    newTasks.forEach(task => {
+      taskEntry += `・${task}\n`
+    })
+    
+    // 変更があった場合のみ差分情報を表示
+    if (diff.added.length > 0 || diff.removed.length > 0) {
+      taskEntry += `\n**最新の変更 (${dateTime}):**\n`
+      
+      if (diff.added.length > 0) {
+        taskEntry += `🆕 追加:\n`
+        diff.added.forEach(task => taskEntry += `・${task}\n`)
+      }
+      
+      if (diff.removed.length > 0) {
+        taskEntry += `🗑️ 削除:\n`
+        diff.removed.forEach(task => taskEntry += `・${task}\n`)
+      }
+    }
+    
+    taskEntry += `\n---\n\n`
+    
+    return updatedContent + taskEntry
+  }
+
+  /**
+   * チャンネルIDから名前を取得
+   */
+  private getChannelNameFromId(channelId: string): string {
+    const channelMap: Record<string, string> = {
+      'C02TJS8D205': 'general',
+      'C02TMQRAS3D': 'random',
+      'C091H8NUJ8L': 'タスク'
+    }
+    return channelMap[channelId] || channelId
+  }
+
+  /**
+   * タスク転送メッセージを投稿
+   */
+  private async postTaskForwardMessage(message: string, originalChannel: string, originalTs: string): Promise<void> {
+    try {
+      const blocks = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: message
+          }
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `🤖 自動転送 | 元メッセージ: <#${originalChannel}> | ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
+            }
+          ]
+        }
+      ]
+
+      await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          channel: 'C02TJS8D205', // #general channel ID
+          text: message,
+          blocks: blocks
+        })
+      })
+    } catch (error) {
+      console.error('Error posting task forward message:', error)
+    }
+  }
+
+  /**
+   * メッセージにリアクションを追加
+   */
+  private async addReaction(channel: string, timestamp: string, reactionName: string): Promise<void> {
+    try {
+      await fetch('https://slack.com/api/reactions.add', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          channel: channel,
+          timestamp: timestamp,
+          name: reactionName
+        })
+      })
+    } catch (error) {
+      console.error('Error adding reaction:', error)
+    }
   }
 }
