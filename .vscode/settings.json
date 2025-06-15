@@ -3,15 +3,20 @@
 		"wrangler.json": "jsonc"
 	},
 	"git.autofetch": true,
-	"git.autofetchPeriod": 30,
+	"git.autofetchPeriod": 10,
 	"git.confirmSync": false,
 	"git.enableSmartCommit": true,
 	"git.postCommitCommand": "sync",
 	"git.showPushSuccessNotification": true,
 	"git.autoSync": "on",
-	"git.autoSyncDelay": 30000,
+	"git.autoSyncDelay": 10000,
 	"git.pullOnSync": true,
 	"git.pushOnSync": true,
+	"git.syncOnCommit": true,
+	"git.syncOnPush": true,
+	"git.syncOnPull": true,
+	"git.autoRefresh": true,
+	"git.refreshOnWindowFocus": true,
 	"files.watcherExclude": {
 		"**/.git/objects/**": true,
 		"**/.git/subtree-cache/**": true,
@@ -23,5 +28,11 @@
 	"git.fetchOnPull": true,
 	"git.rebaseWhenSync": false,
 	"files.autoSave": "afterDelay",
-	"files.autoSaveDelay": 1000
+	"files.autoSaveDelay": 500,
+	"git.enableStatusBarSync": true,
+	"git.periodicFetch": true,
+	"git.periodicFetchInterval": 10,
+	"scm.autoReveal": true,
+	"scm.alwaysShowProviders": true,
+	"scm.defaultViewMode": "tree"
 }
