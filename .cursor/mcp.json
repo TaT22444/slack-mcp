@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "noroshi-slack": {
+      "command": "node",
+      "args": ["./slack-mcp-server/index.js"]
+    }
+  }
+} 
