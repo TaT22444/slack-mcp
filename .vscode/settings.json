@@ -8,5 +8,4 @@
 	"git.enableSmartCommit": true,
 	"git.postCommitCommand": "sync",
 	"git.showPushSuccessNotification": true
-	
 }
