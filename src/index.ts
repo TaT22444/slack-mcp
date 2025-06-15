@@ -209,14 +209,18 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     }
 
     try {
+      // キャッシュバスター用のタイムスタンプ
+      const timestamp = Date.now()
+      
       // タスクフォルダーの内容を取得
       const response = await fetch(
-        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク`,
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${timestamp}`,
         {
           headers: {
             'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'NOROSHI-MCP-Server'
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Cache-Control': 'no-cache'
           }
         }
       )
@@ -236,7 +240,12 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       // .mdファイルのみを処理
       for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
         try {
-          const fileResponse = await fetch(file.download_url)
+          // ファイル内容取得時にもキャッシュバスターを追加
+          const fileResponse = await fetch(`${file.download_url}?t=${timestamp}`, {
+            headers: {
+              'Cache-Control': 'no-cache'
+            }
+          })
           const content = await fileResponse.text()
           const parsedData = this.parseTaskFile(file.name, content, userName)
           if (parsedData) {
@@ -265,16 +274,22 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     let tasks: string[] = []
     let lastUpdated = ''
     let inTaskSection = false
+    let foundTargetUser = false
     
     for (const line of lines) {
       // ユーザーセクションの検出
       if (line.startsWith('## ')) {
+        // 前のユーザーが対象ユーザーだった場合、データを保存
         if (currentUser === targetUserName && tasks.length > 0) {
+          foundTargetUser = true
           break // 対象ユーザーのセクションが終了
         }
+        
+        // 新しいユーザーの開始
         currentUser = line.replace('## ', '').trim()
         inTaskSection = false
         tasks = []
+        lastUpdated = ''
       }
       
       // 現在のタスクセクションの検出
@@ -299,7 +314,12 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       }
     }
     
+    // ファイル終端での処理：最後のユーザーが対象ユーザーの場合
     if (currentUser === targetUserName && tasks.length > 0) {
+      foundTargetUser = true
+    }
+    
+    if (foundTargetUser && tasks.length > 0) {
       return {
         fileName,
         date,
@@ -326,6 +346,9 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     
     const latestData = taskData[0]
     const userTasks = latestData.users[0]
+    
+    // デバッグ情報を追加
+    console.log(`[DEBUG] User: ${userName}, File: ${latestData.fileName}, Tasks: ${JSON.stringify(userTasks.tasks)}`)
     
     result += `📊 **概要**: ${userTasks.tasks.length}件のタスクが登録されています\n`
     result += `📅 **最終更新**: ${userTasks.lastUpdated}\n`
@@ -917,14 +940,18 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     }
 
     try {
+      // キャッシュバスター用のタイムスタンプ
+      const timestamp = Date.now()
+      
       // タスクフォルダーの内容を取得
       const response = await fetch(
-        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク`,
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${timestamp}`,
         {
           headers: {
             'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'NOROSHI-MCP-Server'
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Cache-Control': 'no-cache'
           }
         }
       )
@@ -944,7 +971,12 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       // .mdファイルのみを処理
       for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
         try {
-          const fileResponse = await fetch(file.download_url)
+          // ファイル内容取得時にもキャッシュバスターを追加
+          const fileResponse = await fetch(`${file.download_url}?t=${timestamp}`, {
+            headers: {
+              'Cache-Control': 'no-cache'
+            }
+          })
           const content = await fileResponse.text()
           const parsedData = this.parseAllUsersTaskFile(file.name, content)
           if (parsedData) {
@@ -1486,13 +1518,17 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       let fileSha = ''
       
       try {
+        // キャッシュバスター用のタイムスタンプ
+        const cacheTimestamp = Date.now()
+        
         const response = await fetch(
-          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${cacheTimestamp}`,
           {
             headers: {
               'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
               'Accept': 'application/vnd.github.v3+json',
-              'User-Agent': 'NOROSHI-MCP-Server'
+              'User-Agent': 'NOROSHI-MCP-Server',
+              'Cache-Control': 'no-cache'
             }
           }
         )
