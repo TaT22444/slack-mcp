@@ -1468,6 +1468,12 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
    * タスクメッセージの自動転送処理
    */
   private async handleTaskMessage(text: string, channel: string, userId: string, messageTs: string): Promise<void> {
+    // ファイル編集コマンドをチェック
+    const editResult = await this.handleFileEditCommands(text, channel, userId, messageTs)
+    if (editResult) {
+      return // ファイル編集コマンドが処理された場合は終了
+    }
+
     // タスクパターンの正規表現
     const taskPatterns = [
       /\[タスク\]/i,
@@ -1531,6 +1537,514 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       console.log(`✅ Task message forwarded from #${channelName} to #general and saved to GitHub`)
     } catch (error) {
       console.error('❌ Error handling task message:', error)
+    }
+  }
+
+  /**
+   * ファイル編集コマンドを処理
+   */
+  private async handleFileEditCommands(text: string, channel: string, userId: string, messageTs: string): Promise<boolean> {
+    const editPatterns = [
+      // [編集] ファイル名 内容
+      /\[編集\]\s*(.+?\.md)\s+([\s\S]+)/i,
+      // [追加] ファイル名 内容
+      /\[追加\]\s*(.+?\.md)\s+([\s\S]+)/i,
+      // [削除] ファイル名 行番号
+      /\[削除\]\s*(.+?\.md)\s+(\d+)/i,
+      // [表示] ファイル名
+      /\[表示\]\s*(.+?\.md)/i,
+      // [新規] ファイル名 内容
+      /\[新規\]\s*(.+?\.md)\s+([\s\S]+)/i
+    ]
+
+    for (const pattern of editPatterns) {
+      const match = text.match(pattern)
+      if (match) {
+        console.log('✅ File edit command detected:', match[0])
+        
+        try {
+          const userName = await this.getUserNameById(userId) || 'Unknown User'
+          let result = ''
+
+          if (text.includes('[編集]')) {
+            result = await this.editMarkdownFile(match[1], match[2], userName)
+          } else if (text.includes('[追加]')) {
+            result = await this.appendToMarkdownFile(match[1], match[2], userName)
+          } else if (text.includes('[削除]')) {
+            result = await this.deleteLineFromMarkdownFile(match[1], parseInt(match[2]), userName)
+          } else if (text.includes('[表示]')) {
+            result = await this.viewMarkdownFile(match[1])
+          } else if (text.includes('[新規]')) {
+            result = await this.createMarkdownFile(match[1], match[2], userName)
+          }
+
+          // 結果をSlackに投稿
+          await this.postMessage(channel, result, messageTs)
+          
+          // 元のメッセージにリアクションを追加
+          await this.addReaction(channel, messageTs, 'memo')
+          
+          return true
+        } catch (error) {
+          console.error('❌ Error handling file edit command:', error)
+          await this.postMessage(channel, `❌ ファイル編集エラー: ${error instanceof Error ? error.message : 'Unknown error'}`, messageTs)
+          return true
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Markdownファイルを編集（完全置換）
+   */
+  private async editMarkdownFile(fileName: string, content: string, userName: string): Promise<string> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return '❌ GitHub連携が設定されていません'
+    }
+
+    try {
+      const filePath = this.normalizeFilePath(fileName)
+      const timestamp = Date.now()
+      const dateTime = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+      // 既存ファイルを取得
+      let fileSha = ''
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${timestamp}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'NOROSHI-MCP-Server',
+              'Cache-Control': 'no-cache'
+            }
+          }
+        )
+
+        if (response.ok) {
+          const fileData = await response.json() as { sha: string }
+          fileSha = fileData.sha
+        }
+      } catch (error) {
+        // ファイルが存在しない場合は新規作成
+      }
+
+      // ファイルを更新
+      const updateResponse = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `📝 ${userName}によるファイル編集: ${fileName} (${dateTime})`,
+            content: this.encodeBase64(content),
+            sha: fileSha || undefined
+          })
+        }
+      )
+
+      if (!updateResponse.ok) {
+        throw new Error(`GitHub API error: ${updateResponse.status}`)
+      }
+
+      return `✅ **ファイル編集完了**\n📄 ファイル: \`${fileName}\`\n👤 編集者: ${userName}\n⏰ 時刻: ${dateTime}\n\n💡 *ファイル全体が新しい内容で置換されました*`
+    } catch (error) {
+      console.error('Error editing markdown file:', error)
+      return `❌ ファイル編集エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * Markdownファイルに内容を追加
+   */
+  private async appendToMarkdownFile(fileName: string, content: string, userName: string): Promise<string> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return '❌ GitHub連携が設定されていません'
+    }
+
+    try {
+      const filePath = this.normalizeFilePath(fileName)
+      const timestamp = Date.now()
+      const dateTime = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+      // 既存ファイルを取得
+      let existingContent = ''
+      let fileSha = ''
+      
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${timestamp}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'NOROSHI-MCP-Server',
+              'Cache-Control': 'no-cache'
+            }
+          }
+        )
+
+        if (response.ok) {
+          const fileData = await response.json() as { content: string, sha: string }
+          existingContent = this.decodeBase64(fileData.content)
+          fileSha = fileData.sha
+        }
+      } catch (error) {
+        // ファイルが存在しない場合は新規作成
+      }
+
+      // 内容を追加
+      const newContent = existingContent + (existingContent ? '\n\n' : '') + `## ${userName} - ${dateTime}\n\n${content}`
+
+      // ファイルを更新
+      const updateResponse = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `➕ ${userName}によるファイル追記: ${fileName} (${dateTime})`,
+            content: this.encodeBase64(newContent),
+            sha: fileSha || undefined
+          })
+        }
+      )
+
+      if (!updateResponse.ok) {
+        throw new Error(`GitHub API error: ${updateResponse.status}`)
+      }
+
+      return `✅ **ファイル追記完了**\n📄 ファイル: \`${fileName}\`\n👤 追記者: ${userName}\n⏰ 時刻: ${dateTime}\n\n💡 *内容がファイル末尾に追加されました*`
+    } catch (error) {
+      console.error('Error appending to markdown file:', error)
+      return `❌ ファイル追記エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * Markdownファイルから指定行を削除
+   */
+  private async deleteLineFromMarkdownFile(fileName: string, lineNumber: number, userName: string): Promise<string> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return '❌ GitHub連携が設定されていません'
+    }
+
+    try {
+      const filePath = this.normalizeFilePath(fileName)
+      const timestamp = Date.now()
+      const dateTime = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+      // 既存ファイルを取得
+      const response = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${timestamp}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Cache-Control': 'no-cache'
+          }
+        }
+      )
+
+      if (!response.ok) {
+        return `❌ ファイル \`${fileName}\` が見つかりません`
+      }
+
+      const fileData = await response.json() as { content: string, sha: string }
+      const existingContent = this.decodeBase64(fileData.content)
+      const lines = existingContent.split('\n')
+
+      if (lineNumber < 1 || lineNumber > lines.length) {
+        return `❌ 行番号 ${lineNumber} は範囲外です（1-${lines.length}）`
+      }
+
+      // 指定行を削除
+      const deletedLine = lines[lineNumber - 1]
+      lines.splice(lineNumber - 1, 1)
+      const newContent = lines.join('\n')
+
+      // ファイルを更新
+      const updateResponse = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `🗑️ ${userName}による行削除: ${fileName} L${lineNumber} (${dateTime})`,
+            content: this.encodeBase64(newContent),
+            sha: fileData.sha
+          })
+        }
+      )
+
+      if (!updateResponse.ok) {
+        throw new Error(`GitHub API error: ${updateResponse.status}`)
+      }
+
+      return `✅ **行削除完了**\n📄 ファイル: \`${fileName}\`\n🗑️ 削除行: ${lineNumber}\n📝 削除内容: \`${deletedLine.substring(0, 100)}${deletedLine.length > 100 ? '...' : ''}\`\n👤 削除者: ${userName}\n⏰ 時刻: ${dateTime}`
+    } catch (error) {
+      console.error('Error deleting line from markdown file:', error)
+      return `❌ 行削除エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * Markdownファイルの内容を表示
+   */
+  private async viewMarkdownFile(fileName: string): Promise<string> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return '❌ GitHub連携が設定されていません'
+    }
+
+    try {
+      const filePath = this.normalizeFilePath(fileName)
+      const timestamp = Date.now()
+
+      const response = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${timestamp}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Cache-Control': 'no-cache'
+          }
+        }
+      )
+
+      if (!response.ok) {
+        return `❌ ファイル \`${fileName}\` が見つかりません`
+      }
+
+      const fileData = await response.json() as { content: string, size: number }
+      const content = this.decodeBase64(fileData.content)
+      const lines = content.split('\n')
+
+      let result = `📄 **ファイル表示: ${fileName}**\n\n`
+      result += `📊 **ファイル情報**\n`
+      result += `・サイズ: ${fileData.size} bytes\n`
+      result += `・行数: ${lines.length} 行\n\n`
+      
+      result += `📝 **内容**\n\`\`\`\n`
+      
+      // 内容が長すぎる場合は最初の50行のみ表示
+      if (lines.length > 50) {
+        result += lines.slice(0, 50).map((line, index) => `${index + 1}: ${line}`).join('\n')
+        result += `\n... (${lines.length - 50}行省略)`
+      } else {
+        result += lines.map((line, index) => `${index + 1}: ${line}`).join('\n')
+      }
+      
+      result += `\n\`\`\``
+
+      return result
+    } catch (error) {
+      console.error('Error viewing markdown file:', error)
+      return `❌ ファイル表示エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * 新しいMarkdownファイルを作成
+   */
+  private async createMarkdownFile(fileName: string, content: string, userName: string): Promise<string> {
+    if (!this.env.GITHUB_TOKEN || !this.env.GITHUB_REPO || !this.env.GITHUB_OWNER) {
+      return '❌ GitHub連携が設定されていません'
+    }
+
+    try {
+      const filePath = this.normalizeFilePath(fileName)
+      const dateTime = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+      // ファイルが既に存在するかチェック
+      try {
+        const checkResponse = await fetch(
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'NOROSHI-MCP-Server'
+            }
+          }
+        )
+
+        if (checkResponse.ok) {
+          return `❌ ファイル \`${fileName}\` は既に存在します。[編集]コマンドを使用してください。`
+        }
+      } catch (error) {
+        // ファイルが存在しない場合は続行
+      }
+
+      // ヘッダー付きの内容を作成
+      const fileContent = `# ${fileName.replace('.md', '')}\n\n作成者: ${userName}\n作成日時: ${dateTime}\n\n---\n\n${content}`
+
+      // ファイルを作成
+      const createResponse = await fetch(
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'NOROSHI-MCP-Server',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `🆕 ${userName}による新規ファイル作成: ${fileName} (${dateTime})`,
+            content: this.encodeBase64(fileContent)
+          })
+        }
+      )
+
+      if (!createResponse.ok) {
+        throw new Error(`GitHub API error: ${createResponse.status}`)
+      }
+
+      return `✅ **新規ファイル作成完了**\n📄 ファイル: \`${fileName}\`\n👤 作成者: ${userName}\n⏰ 時刻: ${dateTime}\n\n💡 *ファイルがGitHubに作成されました*`
+    } catch (error) {
+      console.error('Error creating markdown file:', error)
+      return `❌ ファイル作成エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * ファイルパスを正規化
+   */
+  private normalizeFilePath(fileName: string): string {
+    // .mdが付いていない場合は追加
+    if (!fileName.endsWith('.md')) {
+      fileName += '.md'
+    }
+    
+    // パスの正規化（危険な文字を除去）
+    fileName = fileName.replace(/[<>:"|?*]/g, '_')
+    
+    // 相対パスやディレクトリトラバーサルを防ぐ
+    fileName = fileName.replace(/\.\./g, '_')
+    
+    return fileName
+  }
+
+  /**
+   * タスク転送メッセージを投稿
+   */
+  private async postTaskForwardMessage(message: string, originalChannel: string, originalTs: string): Promise<void> {
+    try {
+      const blocks = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: message
+          }
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `🤖 自動転送 | 元メッセージ: <#${originalChannel}> | ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
+            }
+          ]
+        }
+      ]
+
+      await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          channel: 'C02TJS8D205', // #general channel ID
+          text: message,
+          blocks: blocks
+        })
+      })
+    } catch (error) {
+      console.error('Error posting task forward message:', error)
+    }
+  }
+
+  /**
+   * メッセージにリアクションを追加
+   */
+  private async addReaction(channel: string, timestamp: string, reactionName: string): Promise<void> {
+    try {
+      await fetch('https://slack.com/api/reactions.add', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          channel: channel,
+          timestamp: timestamp,
+          name: reactionName
+        })
+      })
+    } catch (error) {
+      console.error('Error adding reaction:', error)
+    }
+  }
+
+  /**
+   * UTF-8対応のBase64エンコード関数
+   */
+  private encodeBase64(input: string): string {
+    // UTF-8文字列をUint8Arrayに変換
+    const encoder = new TextEncoder()
+    const uint8Array = encoder.encode(input)
+    
+    // Uint8ArrayをBase64文字列に変換
+    let binary = ''
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i])
+    }
+    
+    return btoa(binary)
+  }
+
+  /**
+   * UTF-8対応のBase64デコード関数
+   */
+  private decodeBase64(input: string): string {
+    try {
+      // Base64文字列をバイナリに変換
+      const binaryString = atob(input)
+      
+      // バイナリ文字列をUint8Arrayに変換
+      const uint8Array = new Uint8Array(binaryString.length)
+      for (let i = 0; i < binaryString.length; i++) {
+        uint8Array[i] = binaryString.charCodeAt(i)
+      }
+      
+      // Uint8ArrayをUTF-8文字列にデコード
+      const decoder = new TextDecoder('utf-8')
+      return decoder.decode(uint8Array)
+    } catch (error) {
+      console.error('Error decoding base64:', error)
+      return ''
     }
   }
 
@@ -1776,108 +2290,5 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       'C091H8NUJ8L': 'タスク'
     }
     return channelMap[channelId] || channelId
-  }
-
-  /**
-   * タスク転送メッセージを投稿
-   */
-  private async postTaskForwardMessage(message: string, originalChannel: string, originalTs: string): Promise<void> {
-    try {
-      const blocks = [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: message
-          }
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `🤖 自動転送 | 元メッセージ: <#${originalChannel}> | ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
-            }
-          ]
-        }
-      ]
-
-      await fetch('https://slack.com/api/chat.postMessage', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          channel: 'C02TJS8D205', // #general channel ID
-          text: message,
-          blocks: blocks
-        })
-      })
-    } catch (error) {
-      console.error('Error posting task forward message:', error)
-    }
-  }
-
-  /**
-   * メッセージにリアクションを追加
-   */
-  private async addReaction(channel: string, timestamp: string, reactionName: string): Promise<void> {
-    try {
-      await fetch('https://slack.com/api/reactions.add', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.env.SLACK_BOT_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          channel: channel,
-          timestamp: timestamp,
-          name: reactionName
-        })
-      })
-    } catch (error) {
-      console.error('Error adding reaction:', error)
-    }
-  }
-
-  /**
-   * UTF-8対応のBase64エンコード関数
-   */
-  private encodeBase64(input: string): string {
-    // UTF-8文字列をUint8Arrayに変換
-    const encoder = new TextEncoder()
-    const uint8Array = encoder.encode(input)
-    
-    // Uint8ArrayをBase64文字列に変換
-    let binary = ''
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i])
-    }
-    
-    return btoa(binary)
-  }
-
-  /**
-   * UTF-8対応のBase64デコード関数
-   */
-  private decodeBase64(input: string): string {
-    try {
-      // Base64文字列をバイナリに変換
-      const binaryString = atob(input)
-      
-      // バイナリ文字列をUint8Arrayに変換
-      const uint8Array = new Uint8Array(binaryString.length)
-      for (let i = 0; i < binaryString.length; i++) {
-        uint8Array[i] = binaryString.charCodeAt(i)
-      }
-      
-      // Uint8ArrayをUTF-8文字列にデコード
-      const decoder = new TextDecoder('utf-8')
-      return decoder.decode(uint8Array)
-    } catch (error) {
-      console.error('Error decoding base64:', error)
-      return ''
-    }
   }
 }
