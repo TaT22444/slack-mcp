@@ -1145,17 +1145,38 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       if (body.type === 'event_callback') {
         const event = body.event as SlackEvent
         
+        // デバッグログ追加
+        console.log('🔍 Slack Event Received:', {
+          type: event.type,
+          channel: event.channel,
+          user: event.user,
+          text: event.text?.substring(0, 100) + '...',
+          timestamp: event.ts
+        })
+        
         // #generalチャンネルと#タスクチャンネルのメッセージを処理
         const targetChannels = ['C02TJS8D205', 'C091H8NUJ8L'] // #general, #タスク
         if (event.type === 'message' && targetChannels.includes(event.channel) && event.text) {
+          console.log('✅ Target channel message detected:', event.channel)
+          
           // ボット自身のメッセージは無視
           if (event.user && !event.user.startsWith('B')) {
+            console.log('✅ Human user message, processing...')
+            
             // タスクパターンの自動転送処理
             await this.handleTaskMessage(event.text, event.channel, event.user, event.ts)
             
             // タスク状況問い合わせ処理
             await this.handleTaskStatusInquiry(event.text, event.channel, event.ts)
+          } else {
+            console.log('⚠️ Bot message ignored:', event.user)
           }
+        } else {
+          console.log('⚠️ Message not in target channels or missing text:', {
+            type: event.type,
+            channel: event.channel,
+            hasText: !!event.text
+          })
         }
         
         return new Response('OK', { status: 200 })
@@ -1460,24 +1481,42 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     // タスクパターンをチェック
     const isTaskMessage = taskPatterns.some(pattern => pattern.test(text))
     
-    if (!isTaskMessage) return
+    console.log('🔍 Task pattern check:', {
+      text: text.substring(0, 100) + '...',
+      isTaskMessage,
+      patterns: taskPatterns.map(p => p.toString())
+    })
+    
+    if (!isTaskMessage) {
+      console.log('❌ Not a task message, skipping...')
+      return
+    }
+    
+    console.log('✅ Task message detected, processing...')
     
     // #generalチャンネルのメッセージは無視（無限ループ防止）
-    if (channel === 'C02TJS8D205') return
-    
+    if (channel === 'C02TJS8D205') {
+      console.log('⚠️ General channel message ignored to prevent loop')
+      return
+    }
+
     try {
       // ユーザー情報を取得
       const userName = await this.getUserNameById(userId) || 'Unknown User'
+      console.log('👤 User identified:', userName)
       
       // チャンネル情報を取得
       const channelName = this.getChannelNameFromId(channel)
+      console.log('📍 Channel identified:', channelName)
       
       // GitHubファイルに保存
       let saveResult = ''
       try {
+        console.log('💾 Saving to GitHub...')
         saveResult = await this.saveTaskToGitHub(userName, text, messageTs)
+        console.log('✅ GitHub save result:', saveResult)
       } catch (error) {
-        console.error('Error saving to GitHub:', error)
+        console.error('❌ Error saving to GitHub:', error)
         saveResult = '⚠️ GitHub保存エラー'
       }
       
@@ -1491,7 +1530,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       
       console.log(`✅ Task message forwarded from #${channelName} to #general and saved to GitHub`)
     } catch (error) {
-      console.error('Error handling task message:', error)
+      console.error('❌ Error handling task message:', error)
     }
   }
 
