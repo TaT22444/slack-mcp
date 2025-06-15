@@ -1,5 +1,11 @@
 {
 	"files.associations": {
 		"wrangler.json": "jsonc"
-	}
+	},
+	"git.autofetch": true,
+	"git.autofetchPeriod": 180,
+	"git.confirmSync": false,
+	"git.enableSmartCommit": true,
+	"git.postCommitCommand": "sync",
+	"git.showPushSuccessNotification": true
 }
