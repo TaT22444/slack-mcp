@@ -1151,17 +1151,25 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
           channel: event.channel,
           user: event.user,
           text: event.text?.substring(0, 100) + '...',
-          timestamp: event.ts
+          timestamp: event.ts,
+          hasBot: event.user?.startsWith('B'),
+          isBot: !event.user || event.user.startsWith('B')
         })
         
         // #generalチャンネルと#タスクチャンネルのメッセージを処理
         const targetChannels = ['C02TJS8D205', 'C091H8NUJ8L'] // #general, #タスク
         if (event.type === 'message' && targetChannels.includes(event.channel) && event.text) {
-          console.log('✅ Target channel message detected:', event.channel)
+          console.log('✅ Target channel message detected:', {
+            channel: event.channel,
+            channelName: event.channel === 'C02TJS8D205' ? 'general' : 'タスク'
+          })
           
-          // ボット自身のメッセージは無視
+          // ボット自身のメッセージは無視（無限ループ防止）
           if (event.user && !event.user.startsWith('B')) {
-            console.log('✅ Human user message, processing...')
+            console.log('✅ Human user message, processing...', {
+              userId: event.user,
+              channel: event.channel
+            })
             
             // タスクパターンの自動転送処理
             await this.handleTaskMessage(event.text, event.channel, event.user, event.ts)
@@ -1169,13 +1177,20 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
             // タスク状況問い合わせ処理
             await this.handleTaskStatusInquiry(event.text, event.channel, event.ts)
           } else {
-            console.log('⚠️ Bot message ignored:', event.user)
+            console.log('⚠️ Bot message ignored to prevent infinite loop:', {
+              user: event.user,
+              channel: event.channel,
+              textPreview: event.text?.substring(0, 50) + '...'
+            })
           }
         } else {
-          console.log('⚠️ Message not in target channels or missing text:', {
+          console.log('⚠️ Message not processed:', {
             type: event.type,
             channel: event.channel,
-            hasText: !!event.text
+            isTargetChannel: targetChannels.includes(event.channel),
+            hasText: !!event.text,
+            reason: !targetChannels.includes(event.channel) ? 'not target channel' : 
+                   !event.text ? 'no text' : 'wrong type'
           })
         }
         
@@ -1490,6 +1505,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     console.log('🔍 Task pattern check:', {
       text: text.substring(0, 100) + '...',
       isTaskMessage,
+      channel: channel,
       patterns: taskPatterns.map(p => p.toString())
     })
     
@@ -1500,22 +1516,23 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     
     console.log('✅ Task message detected, processing...')
     
-    // #generalチャンネルのメッセージは無視（無限ループ防止）
-    if (channel === 'C02TJS8D205') {
-      console.log('⚠️ General channel message ignored to prevent loop')
-      return
-    }
+    // #generalチャンネルでのタスクメッセージは転送処理をスキップ（GitHubには保存）
+    const isGeneralChannel = channel === 'C02TJS8D205'
+    const isTaskChannel = channel === 'C091H8NUJ8L'
+    
+    console.log('📍 Channel analysis:', {
+      channel,
+      isGeneralChannel,
+      isTaskChannel,
+      channelName: this.getChannelNameFromId(channel)
+    })
 
     try {
       // ユーザー情報を取得
       const userName = await this.getUserNameById(userId) || 'Unknown User'
       console.log('👤 User identified:', userName)
       
-      // チャンネル情報を取得
-      const channelName = this.getChannelNameFromId(channel)
-      console.log('📍 Channel identified:', channelName)
-      
-      // GitHubファイルに保存
+      // GitHubファイルに保存（全チャンネル共通）
       let saveResult = ''
       try {
         console.log('💾 Saving to GitHub...')
@@ -1526,15 +1543,26 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         saveResult = '⚠️ GitHub保存エラー'
       }
       
-      // #generalに転送メッセージを投稿
-      const forwardMessage = `📋 *${userName}さんのタスク* (#${channelName}より自動転送)\n\n${text}\n\n${saveResult}`
-      
-      await this.postTaskForwardMessage(forwardMessage, channel, messageTs)
+      // #タスクチャンネルからのメッセージのみ#generalに転送
+      if (isTaskChannel) {
+        const channelName = this.getChannelNameFromId(channel)
+        const forwardMessage = `📋 *${userName}さんのタスク* (#${channelName}より自動転送)\n\n${text}\n\n${saveResult}`
+        
+        console.log('📤 Forwarding message to #general...')
+        await this.postTaskForwardMessage(forwardMessage, channel, messageTs)
+      } else if (isGeneralChannel) {
+        console.log('⚠️ General channel task message - GitHub save only, no forwarding')
+      } else {
+        console.log('📍 Other channel task message - processing normally')
+        const channelName = this.getChannelNameFromId(channel)
+        const forwardMessage = `📋 *${userName}さんのタスク* (#${channelName}より自動転送)\n\n${text}\n\n${saveResult}`
+        await this.postTaskForwardMessage(forwardMessage, channel, messageTs)
+      }
       
       // 元のメッセージにリアクションを追加
       await this.addReaction(channel, messageTs, 'white_check_mark')
       
-      console.log(`✅ Task message forwarded from #${channelName} to #general and saved to GitHub`)
+      console.log(`✅ Task message processed: channel=${channel}, user=${userName}, saved=${!!saveResult}`)
     } catch (error) {
       console.error('❌ Error handling task message:', error)
     }
