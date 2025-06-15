@@ -28,6 +28,9 @@ interface SlackUser {
   name: string
   real_name: string
   display_name: string
+  profile?: {
+    display_name: string
+  }
 }
 
 interface TaskMessage {
@@ -184,7 +187,11 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     try {
       const users = await this.getUsers()
       const user = users.find(u => u.id === userId)
-      const userName = user?.real_name || user?.display_name || user?.name || 'Unknown User'
+      
+      // タスク保存時と同じ優先順位でユーザー名を取得（統一性のため）
+      const userName = user?.profile?.display_name || user?.real_name || user?.name || 'Unknown User'
+      
+      console.log(`[DEBUG] Analyzing tasks for user: ${userName} (ID: ${userId})`)
       
       // GitHubからタスクファイルを読み取り
       const taskData = await this.getTasksFromGitHub(userName)

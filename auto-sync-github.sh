@@ -18,7 +18,7 @@ if ! git status &>/dev/null; then
     exit 1
 fi
 
-# リモートの変更をチェック
+# リモートの変更をチェック（より頻繁に）
 git fetch origin main &>/dev/null
 
 # ローカルとリモートの差分をチェック
@@ -45,7 +45,13 @@ if [ "$LOCAL" != "$REMOTE" ]; then
             
             # VS Code/Cursorに通知（ファイルが開かれている場合は自動リロード）
             if command -v osascript &>/dev/null; then
-                osascript -e 'display notification "タスクファイルが更新されました" with title "NOROSHI Auto-Sync"' 2>/dev/null || true
+                osascript -e 'display notification "タスクファイルが更新されました - Cursorで確認してください" with title "NOROSHI Auto-Sync" sound name "Glass"' 2>/dev/null || true
+            fi
+            
+            # VS Code/Cursorのワークスペースをリロード（可能な場合）
+            if command -v code &>/dev/null; then
+                # VS Codeが開いている場合、ワークスペースをリロード
+                code --reuse-window "$SCRIPT_DIR" 2>/dev/null || true
             fi
         fi
         
