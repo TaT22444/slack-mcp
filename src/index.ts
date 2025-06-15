@@ -179,6 +179,30 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
   }
 
   /**
+   * 特定ユーザーのタスク状況を分析します（ユーザー名指定版）
+   * @param userId {string} ユーザーID
+   * @param userName {string} 既に取得済みのユーザー名
+   * @returns {Promise<string>} タスク分析結果
+   */
+  async analyzeUserTasksWithUserName(userId: string, userName: string): Promise<string> {
+    try {
+      console.log(`[DEBUG] Analyzing tasks for user: ${userName} (ID: ${userId})`)
+      
+      // GitHubからタスクファイルを読み取り
+      const taskData = await this.getTasksFromGitHub(userName)
+      
+      if (!taskData || taskData.length === 0) {
+        // GitHubからデータが取得できない場合は、従来のSlack検索にフォールバック
+        return await this.analyzeUserTasksFromSlack(userId, userName)
+      }
+      
+      return this.formatTaskFileAnalysis(userName, taskData)
+    } catch (error) {
+      return `❌ エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
    * 特定ユーザーのタスク状況を分析します
    * @param userId {string} ユーザーID
    * @returns {Promise<string>} タスク分析結果
@@ -590,8 +614,10 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     
     if (!userId || !userName) return
     
-    // タスク分析を実行
-    const analysis = await this.analyzeUserTasks(userId)
+    console.log(`[DEBUG] Task inquiry for user: ${userName} (ID: ${userId})`)
+    
+    // タスク分析を実行（既に取得済みのuserNameを渡す）
+    const analysis = await this.analyzeUserTasksWithUserName(userId, userName)
     
     // 結果を投稿
     await this.postMessage(channel, analysis, messageTs)
