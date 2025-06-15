@@ -1499,7 +1499,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
 
         if (response.ok) {
           const fileData = await response.json() as { content: string, sha: string }
-          existingContent = atob(fileData.content)
+          existingContent = this.decodeBase64(fileData.content)
           fileSha = fileData.sha
         }
       } catch (error) {
@@ -1528,7 +1528,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
           },
           body: JSON.stringify({
             message: `📋 ${userName}のタスク更新 (${dateTime})`,
-            content: btoa(newContent),
+            content: this.encodeBase64(newContent),
             sha: fileSha || undefined
           })
         }
@@ -1763,6 +1763,46 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       })
     } catch (error) {
       console.error('Error adding reaction:', error)
+    }
+  }
+
+  /**
+   * UTF-8対応のBase64エンコード関数
+   */
+  private encodeBase64(input: string): string {
+    // UTF-8文字列をUint8Arrayに変換
+    const encoder = new TextEncoder()
+    const uint8Array = encoder.encode(input)
+    
+    // Uint8ArrayをBase64文字列に変換
+    let binary = ''
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i])
+    }
+    
+    return btoa(binary)
+  }
+
+  /**
+   * UTF-8対応のBase64デコード関数
+   */
+  private decodeBase64(input: string): string {
+    try {
+      // Base64文字列をバイナリに変換
+      const binaryString = atob(input)
+      
+      // バイナリ文字列をUint8Arrayに変換
+      const uint8Array = new Uint8Array(binaryString.length)
+      for (let i = 0; i < binaryString.length; i++) {
+        uint8Array[i] = binaryString.charCodeAt(i)
+      }
+      
+      // Uint8ArrayをUTF-8文字列にデコード
+      const decoder = new TextDecoder('utf-8')
+      return decoder.decode(uint8Array)
+    } catch (error) {
+      console.error('Error decoding base64:', error)
+      return ''
     }
   }
 }
