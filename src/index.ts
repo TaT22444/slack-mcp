@@ -601,8 +601,8 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         return null
       }
 
-      // @username形式で返す（Slackのユーザー名を優先）
-      return `@${data.user.name}`
+      // 表示名 > 実名 > ユーザー名の優先順位で返す（タスク保存と統一）
+      return data.user.profile?.display_name || data.user.real_name || data.user.name
     } catch (error) {
       return null
     }
