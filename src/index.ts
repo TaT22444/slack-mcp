@@ -247,7 +247,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
             }
           })
           const content = await fileResponse.text()
-          const parsedData = this.parseTaskFile(file.name, content, userName)
+          const parsedData = this.parseAllUsersTaskFile(file.name, content)
           if (parsedData) {
             taskFiles.push(parsedData)
           }
@@ -260,6 +260,42 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     } catch (error) {
       console.error('Error fetching from GitHub:', error)
       return []
+    }
+  }
+
+  /**
+   * ユーザー名のバリエーションを取得
+   */
+  private async getUserNameVariations(userName: string): Promise<string[]> {
+    const variations: string[] = [userName]
+    
+    try {
+      // Slackユーザー情報から他の名前パターンを取得
+      const users = await this.getUsers()
+      const user = users.find(u => 
+        u.name === userName || 
+        u.real_name === userName || 
+        u.display_name === userName
+      )
+      
+      if (user) {
+        // 実名、表示名、ユーザー名のすべてのバリエーションを追加
+        if (user.real_name && !variations.includes(user.real_name)) {
+          variations.push(user.real_name)
+        }
+        if (user.display_name && !variations.includes(user.display_name)) {
+          variations.push(user.display_name)
+        }
+        if (user.name && !variations.includes(user.name)) {
+          variations.push(user.name)
+        }
+      }
+      
+      console.log(`[DEBUG] User name variations for ${userName}:`, variations)
+      return variations
+    } catch (error) {
+      console.error('Error getting user name variations:', error)
+      return variations
     }
   }
 
