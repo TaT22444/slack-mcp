@@ -1,0 +1,15 @@
+name = "noroshi-mcp-server"
+main = "src/index.ts"
+compatibility_date = "2024-12-20"
+compatibility_flags = ["nodejs_compat"]
+
+[env.production]
+name = "noroshi-mcp-server"
+
+[env.staging]
+name = "noroshi-mcp-server-staging"
+
+# Environment variables (set via wrangler secret)
+# SLACK_BOT_TOKEN
+# SLACK_APP_TOKEN  
+# SLACK_TEAM_ID 

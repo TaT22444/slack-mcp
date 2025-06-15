@@ -207,4 +207,4 @@ npx wrangler tail --since 1h
 
 ## 🎉 完了！
 
-これでNOROSHIタスクモニターがCloudflare上でリモートMCPサーバーとして稼働し、GitHubタスクファイルと連携した24時間365日のAI統合タスク管理システムが完成です！🌟 
+これでNOROSHIタスクモニターがCloudflare上でリモートMCPサーバーとして稼働し、GitHubタスクファイルと連携した24時間365日のAI統合タスク管理システムが完成です！🌟

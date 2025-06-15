@@ -1,0 +1,52 @@
+{
+  "name": "noroshi-slack-mcp-server",
+  "version": "1.0.0",
+  "description": "NOROSHI プロジェクト専用 Slack MCP Server - 社内業務効率化のためのSlack連携サーバー",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "monitor": "node task-monitor.js",
+    "monitor-socket": "node task-monitor-socket.js",
+    "monitor-debug": "node task-monitor-debug.js",
+    "monitor-md": "node task-monitor-with-md.js",
+    "monitor-smart": "node task-monitor-smart-update.js",
+    "monitor-clean": "node task-monitor-clean.js",
+    "monitor-reminder": "node task-monitor-with-reminder.js",
+    "monitor-scheduled": "node task-monitor-scheduled.js",
+    "tunnel": "npx ngrok http 3000",
+    "test": "echo \"No tests specified yet\" && exit 0",
+    "mcp:setup": "npx workers-mcp setup",
+    "mcp:deploy": "npx wrangler deploy",
+    "mcp:dev": "npx wrangler dev",
+    "mcp:tail": "npx wrangler tail",
+    "mcp:secret": "npx wrangler secret put"
+  },
+  "keywords": [
+    "slack",
+    "mcp",
+    "cursor",
+    "noroshi",
+    "業務効率化",
+    "ai",
+    "automation"
+  ],
+  "author": "NOROSHI Team",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/server-slack": "^0.1.0",
+    "@slack/bolt": "^3.17.1",
+    "express": "^4.18.2",
+    "dotenv": "^16.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "NOROSHI/slack-mcp-server"
+  },
+  "devDependencies": {
+    "ngrok": "^5.0.0-beta.2"
+  }
+}
