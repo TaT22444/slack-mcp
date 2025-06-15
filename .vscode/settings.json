@@ -7,5 +7,15 @@
 	"git.confirmSync": false,
 	"git.enableSmartCommit": true,
 	"git.postCommitCommand": "sync",
-	"git.showPushSuccessNotification": true
+	"git.showPushSuccessNotification": true,
+	"files.watcherExclude": {
+		"**/.git/objects/**": true,
+		"**/.git/subtree-cache/**": true,
+		"**/node_modules/*/**": true
+	},
+	"git.autoRepositoryDetection": true,
+	"git.autoStash": true,
+	"git.pullBeforeCheckout": true,
+	"git.fetchOnPull": true,
+	"git.rebaseWhenSync": false
 }
