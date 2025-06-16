@@ -990,6 +990,9 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       } else if (hour === 17) {
         reportType = '夕方のタスク状況'
         reportMessage = '🌆 **本日のタスク完了状況をお知らせします**'
+      } else if (hour === 21) {
+        reportType = '夜のタスク状況'
+        reportMessage = '🌙 **本日のタスク総括をお知らせします**'
       }
       
       if (reportMessage) {
