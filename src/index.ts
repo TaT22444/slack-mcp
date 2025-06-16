@@ -1094,7 +1094,8 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
    */
   private parseAllUsersTaskFile(fileName: string, content: string): TaskFileData | null {
     const lines = content.split('\n')
-    const date = fileName.match(/(\d{4}-\d{2}-\d{2})/)?.[1] || ''
+    // 汎用ファイル名の場合は現在日付を使用
+    const date = fileName.match(/(\d{4}-\d{2}-\d{2})/)?.[1] || new Date().toISOString().split('T')[0]
     
     const users: Array<{
       userName: string
@@ -2183,9 +2184,10 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
 
     try {
       const now = new Date(parseFloat(timestamp) * 1000)
-      const today = now.toISOString().split('T')[0] // YYYY-MM-DD
       const dateTime = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
-      const fileName = `${today}-tasks.md`
+      
+      // より汎用的なファイル名を使用
+      const fileName = `tasks.md`
       const filePath = `タスク/${fileName}`
 
       // 新しいタスクリストを解析
@@ -2223,11 +2225,19 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       // 既存のユーザータスクを取得
       const previousTasks = this.getUserPreviousTasksFromContent(userName, existingContent)
       
+      // タスクを追加方式で処理（置換ではなく追加）
+      const combinedTasks = [...previousTasks, ...newTasks]
+      const uniqueTasks = [...new Set(combinedTasks)] // 重複除去
+      
       // タスクの差分を計算
-      const diff = this.calculateTaskDiff(previousTasks, newTasks)
+      const diff = {
+        added: newTasks,
+        removed: [] as string[],
+        unchanged: previousTasks
+      }
       
       // 新しいコンテンツを生成
-      const newContent = this.generateUpdatedTaskContent(existingContent, userName, newTasks, diff, dateTime, today)
+      const newContent = this.generateUpdatedTaskContent(existingContent, userName, uniqueTasks, diff, dateTime, fileName)
       
       // GitHubにファイルを更新/作成
       const updateResponse = await fetch(
@@ -2241,7 +2251,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            message: `📋 ${userName}のタスク更新 (${dateTime})`,
+            message: `📋 ${userName}のタスク追加 (${dateTime})`,
             content: this.encodeBase64(newContent),
             sha: fileSha || undefined
           })
@@ -2254,19 +2264,13 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
 
       // 差分情報を生成
       let changeInfo = ''
-      if (diff.added.length > 0 || diff.removed.length > 0) {
-        changeInfo = `📊 *変更内容:*`
-        if (diff.added.length > 0) {
-          changeInfo += ` 🆕追加${diff.added.length}件`
-        }
-        if (diff.removed.length > 0) {
-          changeInfo += ` 🗑️削除${diff.removed.length}件`
-        }
+      if (diff.added.length > 0) {
+        changeInfo = `📊 *変更内容:* 🆕追加${diff.added.length}件`
         if (diff.unchanged.length > 0) {
           changeInfo += ` 🔄継続${diff.unchanged.length}件`
         }
       } else {
-        changeInfo = '📊 *変更内容:* 新規登録'
+        changeInfo = '📊 *変更内容:* 変更なし（重複タスク）'
       }
 
       return `✅ *GitHub保存完了* | ${changeInfo}\n📄 ファイル: \`${fileName}\``
@@ -2365,11 +2369,11 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     newTasks: string[],
     diff: { added: string[], removed: string[], unchanged: string[] },
     dateTime: string,
-    today: string
+    fileName: string
   ): string {
     // 既存コンテンツがない場合は新規作成
     if (!existingContent) {
-      existingContent = `# 📅 ${today} のタスク\n\n`
+      existingContent = `# 📋 タスク管理\n\n## NOROSHI-AI\n\n**現在のタスク:**\n\n---\n\n`
     }
     
     // 同じユーザーの既存エントリを削除
