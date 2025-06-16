@@ -278,8 +278,22 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       const nameVariations = await this.getUserNameVariations(userName)
       console.log(`[DEBUG] Searching GitHub for user variations:`, nameVariations)
 
-      // .mdファイルのみを処理
-      for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
+      // .mdファイルを優先順位付きで処理
+      const mdFiles = files.filter(f => f.name.endsWith('.md') && f.type === 'file')
+      
+      // 優先順位: 1. tasks.md (汎用ファイル), 2. 日付順の古いファイル
+      const prioritizedFiles = mdFiles.sort((a, b) => {
+        // tasks.mdを最優先
+        if (a.name === 'tasks.md') return -1
+        if (b.name === 'tasks.md') return 1
+        
+        // その他は日付順（新しい順）
+        return b.name.localeCompare(a.name)
+      })
+      
+      console.log(`[DEBUG] File processing order:`, prioritizedFiles.map(f => f.name))
+
+      for (const file of prioritizedFiles) {
         try {
           // ファイル内容取得時にも強力なキャッシュバスターを追加
           const fileResponse = await fetch(`${file.download_url}?t=${cacheBuster}`, {
@@ -296,11 +310,17 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
           // 各名前バリエーションで検索
           for (const nameVariation of nameVariations) {
             const parsedData = this.parseTaskFile(file.name, content, nameVariation)
-            if (parsedData) {
+          if (parsedData) {
               console.log(`[DEBUG] Found tasks for ${nameVariation} in ${file.name}: ${JSON.stringify(parsedData.users[0].tasks)}`)
-              taskFiles.push(parsedData)
+            taskFiles.push(parsedData)
               break // 見つかったら他のバリエーションは試さない
             }
+          }
+          
+          // tasks.mdでユーザーが見つかった場合は、それを最優先として他のファイルは無視
+          if (file.name === 'tasks.md' && taskFiles.length > 0) {
+            console.log(`[DEBUG] Found user in tasks.md, prioritizing this file over others`)
+            break
           }
         } catch (error) {
           console.error(`Error reading file ${file.name}:`, error)
