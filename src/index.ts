@@ -978,21 +978,21 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       let reportMessage = ''
       
       // 時間帯に応じた報告タイプを設定
-      if (hour === 9) {
-        reportType = '朝のタスク状況'
-        reportMessage = '🌅 **本日のタスク状況をお知らせします**'
-      } else if (hour === 13) {
-        reportType = '昼のタスク状況'
-        reportMessage = '🍽️ **現在のタスク進捗状況をお知らせします**'
-      } else if (hour === 15 && minute === 30) {
-        reportType = '午後のタスク状況'
-        reportMessage = '☕ **午後のタスク進捗状況をお知らせします**'
-      } else if (hour === 17) {
-        reportType = '夕方のタスク状況'
-        reportMessage = '🌆 **本日のタスク完了状況をお知らせします**'
-      } else if (hour === 21 && minute === 10) {
-        reportType = '夜のタスク状況（詳細）'
-        reportMessage = '🌃 **本日のタスク詳細総括をお知らせします**'
+      if (hour === 21 && minute === 20) {
+        reportType = '夜のタスク状況1'
+        reportMessage = '🌃 **21:20 夜のタスク状況をお知らせします**'
+      } else if (hour === 21 && minute === 30) {
+        reportType = '夜のタスク状況2'
+        reportMessage = '🌙 **21:30 夜のタスク進捗をお知らせします**'
+      } else if (hour === 21 && minute === 40) {
+        reportType = '夜のタスク状況3'
+        reportMessage = '✨ **21:40 夜のタスク詳細をお知らせします**'
+      } else if (hour === 21 && minute === 50) {
+        reportType = '夜のタスク状況4'
+        reportMessage = '🌟 **21:50 夜のタスク総括をお知らせします**'
+      } else if (hour === 22 && minute === 0) {
+        reportType = '夜のタスク状況5'
+        reportMessage = '🌌 **22:00 本日最終タスク報告をお知らせします**'
       }
       
       if (reportMessage) {
