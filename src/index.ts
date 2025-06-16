@@ -87,6 +87,10 @@ interface SlackEventPayload {
 }
 
 export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
+  // 短期間キャッシュ（30秒）
+  private taskCache: Map<string, { data: TaskFileData[], timestamp: number }> = new Map()
+  private readonly CACHE_DURATION = 30 * 1000 // 30秒
+
   constructor(ctx: ExecutionContext, env: Env) {
     super(ctx, env)
   }
@@ -239,28 +243,34 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       return []
     }
 
+    // キャッシュチェック
+    const cacheKey = `tasks_${userName}`
+    const cached = this.taskCache.get(cacheKey)
+    const now = Date.now()
+    
+    if (cached && (now - cached.timestamp) < this.CACHE_DURATION) {
+      console.log(`[DEBUG] Using cached data for ${userName} (age: ${now - cached.timestamp}ms)`)
+      return cached.data
+    }
+
     try {
-      // 超強力なキャッシュバスター用のタイムスタンプ + ランダム値 + ユーザー識別子
+      // 最適化されたキャッシュバスター（過度に複雑にしない）
       const timestamp = Date.now()
       const random = Math.random().toString(36).substring(7)
-      const userHash = userName.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0)
-      const cacheBuster = `${timestamp}_${random}_${Math.abs(userHash)}`
+      const cacheBuster = `${timestamp}_${random}`
       
       console.log(`[DEBUG] Fetching GitHub files with cache buster: ${cacheBuster}`)
       
       // タスクフォルダーの内容を取得
       const response = await fetch(
-        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${cacheBuster}&_cb=${Date.now()}`,
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${cacheBuster}`,
         {
           headers: {
             'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'NOROSHI-MCP-Server',
-            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-            'If-None-Match': '', // ETags無効化
-            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT' // 条件付きリクエスト無効化
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
           }
         }
       )
@@ -298,18 +308,15 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
 
       for (const file of prioritizedFiles) {
         try {
-          // ファイル内容取得時にも超強力なキャッシュバスターを追加
+          // ファイル内容取得時も最適化されたキャッシュバスター
           const fileTimestamp = Date.now()
           const fileRandom = Math.random().toString(36).substring(7)
-          const fileCacheBuster = `${fileTimestamp}_${fileRandom}_${Math.abs(userHash)}`
+          const fileCacheBuster = `${fileTimestamp}_${fileRandom}`
           
-          const fileResponse = await fetch(`${file.download_url}?t=${fileCacheBuster}&_cb=${fileTimestamp}&_r=${fileRandom}`, {
+          const fileResponse = await fetch(`${file.download_url}?t=${fileCacheBuster}`, {
             headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-              'Pragma': 'no-cache',
-              'Expires': '0',
-              'If-None-Match': '',
-              'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
             }
           })
           const content = await fileResponse.text()
@@ -2227,24 +2234,20 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       let fileSha = ''
       
       try {
-        // 超強力なキャッシュバスター用のタイムスタンプ + ランダム値
+        // 最適化されたキャッシュバスター
         const cacheTimestamp = Date.now()
         const cacheRandom = Math.random().toString(36).substring(7)
-        const userHash = userName.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0)
-        const cacheBuster = `${cacheTimestamp}_${cacheRandom}_${Math.abs(userHash)}`
+        const cacheBuster = `${cacheTimestamp}_${cacheRandom}`
         
         const response = await fetch(
-          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${cacheBuster}&_cb=${cacheTimestamp}`,
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${cacheBuster}`,
           {
             headers: {
               'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
               'Accept': 'application/vnd.github.v3+json',
               'User-Agent': 'NOROSHI-MCP-Server',
-              'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-              'Pragma': 'no-cache',
-              'Expires': '0',
-              'If-None-Match': '',
-              'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
             }
           }
         )
