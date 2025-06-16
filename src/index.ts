@@ -240,24 +240,27 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     }
 
     try {
-      // 強力なキャッシュバスター用のタイムスタンプ + ランダム値
+      // 超強力なキャッシュバスター用のタイムスタンプ + ランダム値 + ユーザー識別子
       const timestamp = Date.now()
       const random = Math.random().toString(36).substring(7)
-      const cacheBuster = `${timestamp}_${random}`
+      const userHash = userName.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0)
+      const cacheBuster = `${timestamp}_${random}_${Math.abs(userHash)}`
       
       console.log(`[DEBUG] Fetching GitHub files with cache buster: ${cacheBuster}`)
       
       // タスクフォルダーの内容を取得
       const response = await fetch(
-        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${cacheBuster}`,
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${cacheBuster}&_cb=${Date.now()}`,
         {
           headers: {
             'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'NOROSHI-MCP-Server',
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
             'Pragma': 'no-cache',
-            'Expires': '0'
+            'Expires': '0',
+            'If-None-Match': '', // ETags無効化
+            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT' // 条件付きリクエスト無効化
           }
         }
       )
@@ -295,17 +298,23 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
 
       for (const file of prioritizedFiles) {
         try {
-          // ファイル内容取得時にも強力なキャッシュバスターを追加
-          const fileResponse = await fetch(`${file.download_url}?t=${cacheBuster}`, {
+          // ファイル内容取得時にも超強力なキャッシュバスターを追加
+          const fileTimestamp = Date.now()
+          const fileRandom = Math.random().toString(36).substring(7)
+          const fileCacheBuster = `${fileTimestamp}_${fileRandom}_${Math.abs(userHash)}`
+          
+          const fileResponse = await fetch(`${file.download_url}?t=${fileCacheBuster}&_cb=${fileTimestamp}&_r=${fileRandom}`, {
             headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
               'Pragma': 'no-cache',
-              'Expires': '0'
+              'Expires': '0',
+              'If-None-Match': '',
+              'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'
             }
           })
           const content = await fileResponse.text()
           
-          console.log(`[DEBUG] File ${file.name} content length: ${content.length}`)
+          console.log(`[DEBUG] File ${file.name} content length: ${content.length} (cache buster: ${fileCacheBuster})`)
           
           // 各名前バリエーションで検索
           for (const nameVariation of nameVariations) {
@@ -2218,17 +2227,24 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       let fileSha = ''
       
       try {
-        // キャッシュバスター用のタイムスタンプ
+        // 超強力なキャッシュバスター用のタイムスタンプ + ランダム値
         const cacheTimestamp = Date.now()
+        const cacheRandom = Math.random().toString(36).substring(7)
+        const userHash = userName.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0)
+        const cacheBuster = `${cacheTimestamp}_${cacheRandom}_${Math.abs(userHash)}`
         
         const response = await fetch(
-          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${cacheTimestamp}`,
+          `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/${encodeURIComponent(filePath)}?t=${cacheBuster}&_cb=${cacheTimestamp}`,
           {
             headers: {
               'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
               'Accept': 'application/vnd.github.v3+json',
               'User-Agent': 'NOROSHI-MCP-Server',
-              'Cache-Control': 'no-cache'
+              'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+              'Pragma': 'no-cache',
+              'Expires': '0',
+              'If-None-Match': '',
+              'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'
             }
           }
         )
