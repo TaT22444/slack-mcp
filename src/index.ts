@@ -670,6 +670,25 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
   }
 
   /**
+   * ユーザーIDから表示名へのマッピング
+   */
+  private getUserDisplayName(userId: string, slackUserName: string | null): string {
+    // 特定のユーザーIDに対する固定の表示名マッピング
+    const userDisplayMapping: Record<string, string> = {
+      'U02TQ34K39S': '相原立弥',  // tatsu0823takasago -> 相原立弥
+      // 他のユーザーマッピングもここに追加可能
+    }
+    
+    // マッピングがある場合は固定の表示名を返す
+    if (userDisplayMapping[userId]) {
+      return userDisplayMapping[userId]
+    }
+    
+    // マッピングがない場合はSlackから取得した名前を返す
+    return slackUserName || 'Unknown User'
+  }
+
+  /**
    * ユーザーIDから名前を取得
    */
   private async getUserNameById(userId: string): Promise<string | null> {
@@ -693,13 +712,16 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       }
       
       if (!data.ok || !data.user) {
-        return null
+        return this.getUserDisplayName(userId, null)
       }
 
-      // 表示名 > 実名 > ユーザー名の優先順位で返す（タスク保存と統一）
-      return data.user.profile?.display_name || data.user.real_name || data.user.name
+      // Slackから取得した名前（表示名 > 実名 > ユーザー名の優先順位）
+      const slackUserName = data.user.profile?.display_name || data.user.real_name || data.user.name
+      
+      // 固定マッピングまたはSlack名を返す
+      return this.getUserDisplayName(userId, slackUserName)
     } catch (error) {
-      return null
+      return this.getUserDisplayName(userId, null)
     }
   }
 
@@ -978,21 +1000,21 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       let reportMessage = ''
       
       // 時間帯に応じた報告タイプを設定
-      if (hour === 21 && minute === 20) {
+      if (hour === 22 && minute === 5) {
         reportType = '夜のタスク状況1'
-        reportMessage = '🌃 **21:20 夜のタスク状況をお知らせします**'
-      } else if (hour === 21 && minute === 30) {
+        reportMessage = '🌃 **22:05 夜のタスク状況をお知らせします**'
+      } else if (hour === 22 && minute === 15) {
         reportType = '夜のタスク状況2'
-        reportMessage = '🌙 **21:30 夜のタスク進捗をお知らせします**'
-      } else if (hour === 21 && minute === 40) {
+        reportMessage = '🌙 **22:15 夜のタスク進捗をお知らせします**'
+      } else if (hour === 22 && minute === 25) {
         reportType = '夜のタスク状況3'
-        reportMessage = '✨ **21:40 夜のタスク詳細をお知らせします**'
-      } else if (hour === 21 && minute === 50) {
+        reportMessage = '✨ **22:25 夜のタスク詳細をお知らせします**'
+      } else if (hour === 22 && minute === 35) {
         reportType = '夜のタスク状況4'
-        reportMessage = '🌟 **21:50 夜のタスク総括をお知らせします**'
-      } else if (hour === 22 && minute === 0) {
+        reportMessage = '🌟 **22:35 夜のタスク総括をお知らせします**'
+      } else if (hour === 22 && minute === 45) {
         reportType = '夜のタスク状況5'
-        reportMessage = '🌌 **22:00 本日最終タスク報告をお知らせします**'
+        reportMessage = '🌌 **22:45 本日最終タスク報告をお知らせします**'
       }
       
       if (reportMessage) {
