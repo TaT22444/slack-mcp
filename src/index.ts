@@ -1071,18 +1071,23 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     }
 
     try {
-      // キャッシュバスター用のタイムスタンプ
+      // 最適化されたキャッシュバスター（タスク照会機能と統一）
       const timestamp = Date.now()
+      const random = Math.random().toString(36).substring(7)
+      const cacheBuster = `${timestamp}_${random}`
+      
+      console.log(`[DEBUG] Auto-reminder fetching GitHub files with cache buster: ${cacheBuster}`)
       
       // タスクフォルダーの内容を取得
       const response = await fetch(
-        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${timestamp}`,
+        `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents/タスク?t=${cacheBuster}`,
         {
           headers: {
             'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'NOROSHI-MCP-Server',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
           }
         }
       )
@@ -1097,30 +1102,56 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         type: string
       }>
 
-      const taskFiles: TaskFileData[] = []
+      // .mdファイルを優先順位付きで処理（タスク照会機能と統一）
+      const mdFiles = files.filter(f => f.name.endsWith('.md') && f.type === 'file')
+      
+      // 優先順位: 1. tasks.md (汎用ファイル), 2. 日付順の古いファイル
+      const prioritizedFiles = mdFiles.sort((a, b) => {
+        // tasks.mdを最優先
+        if (a.name === 'tasks.md') return -1
+        if (b.name === 'tasks.md') return 1
+        
+        // その他は日付順（新しい順）
+        return b.name.localeCompare(a.name)
+      })
+      
+      console.log(`[DEBUG] Auto-reminder file processing order:`, prioritizedFiles.map(f => f.name))
 
-      // .mdファイルのみを処理
-      for (const file of files.filter(f => f.name.endsWith('.md') && f.type === 'file')) {
-        try {
-          // ファイル内容取得時にもキャッシュバスターを追加
-          const fileResponse = await fetch(`${file.download_url}?t=${timestamp}`, {
-            headers: {
-              'Cache-Control': 'no-cache'
-            }
-          })
-          const content = await fileResponse.text()
-          const parsedData = this.parseAllUsersTaskFile(file.name, content)
-          if (parsedData) {
-            taskFiles.push(parsedData)
-          }
-        } catch (error) {
-          console.error(`Error reading file ${file.name}:`, error)
-        }
+      // 最優先ファイル（通常はtasks.md）のみを処理
+      const priorityFile = prioritizedFiles[0]
+      if (!priorityFile) {
+        console.log(`[DEBUG] No markdown files found for auto-reminder`)
+        return []
       }
 
-      return taskFiles.sort((a, b) => b.date.localeCompare(a.date)) // 日付順でソート
+      try {
+        // ファイル内容取得時も最適化されたキャッシュバスター
+        const fileTimestamp = Date.now()
+        const fileRandom = Math.random().toString(36).substring(7)
+        const fileCacheBuster = `${fileTimestamp}_${fileRandom}`
+        
+        const fileResponse = await fetch(`${priorityFile.download_url}?t=${fileCacheBuster}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        })
+        const content = await fileResponse.text()
+        
+        console.log(`[DEBUG] Auto-reminder file ${priorityFile.name} content length: ${content.length} (cache buster: ${fileCacheBuster})`)
+        
+        const parsedData = this.parseAllUsersTaskFile(priorityFile.name, content)
+        if (parsedData) {
+          console.log(`[DEBUG] Auto-reminder found ${parsedData.users.length} users in ${priorityFile.name}`)
+          return [parsedData]
+        }
+      } catch (error) {
+        console.error(`Error reading file ${priorityFile.name}:`, error)
+      }
+
+      return []
     } catch (error) {
-      console.error('Error fetching from GitHub:', error)
+      console.error('Error fetching from GitHub for auto-reminder:', error)
       return []
     }
   }
