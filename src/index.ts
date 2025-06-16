@@ -1438,6 +1438,66 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
                   properties: {},
                   required: []
                 }
+              },
+              // 新しいファイル操作ツール
+              {
+                name: 'editFile',
+                description: 'GitHubファイルを編集します（Cursor統合対応）',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    fileName: { type: 'string', description: 'ファイル名（.md拡張子）' },
+                    content: { type: 'string', description: '新しいファイル内容' }
+                  },
+                  required: ['fileName', 'content']
+                }
+              },
+              {
+                name: 'appendToFile',
+                description: 'GitHubファイルに内容を追加します',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    fileName: { type: 'string', description: 'ファイル名（.md拡張子）' },
+                    content: { type: 'string', description: '追加する内容' }
+                  },
+                  required: ['fileName', 'content']
+                }
+              },
+              {
+                name: 'viewFile',
+                description: 'GitHubファイルの内容を表示します',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    fileName: { type: 'string', description: 'ファイル名（.md拡張子）' }
+                  },
+                  required: ['fileName']
+                }
+              },
+              {
+                name: 'createFile',
+                description: '新しいGitHubファイルを作成します',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    fileName: { type: 'string', description: 'ファイル名（.md拡張子）' },
+                    content: { type: 'string', description: 'ファイル内容' }
+                  },
+                  required: ['fileName', 'content']
+                }
+              },
+              {
+                name: 'deleteLineFromFile',
+                description: 'GitHubファイルから指定行を削除します',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    fileName: { type: 'string', description: 'ファイル名（.md拡張子）' },
+                    lineNumber: { type: 'number', description: '削除する行番号' }
+                  },
+                  required: ['fileName', 'lineNumber']
+                }
               }
             ]
           }
@@ -1550,6 +1610,62 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
                   {
                     type: 'text',
                     text: 'scheduled関数が正常に実行されました。Slackチャンネルを確認してください。'
+                  }
+                ]
+              }
+              break
+
+            // 新しいファイル操作ツールのハンドラー
+            case 'editFile':
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: await this.editMarkdownFile(args.fileName, args.content, 'MCP-User')
+                  }
+                ]
+              }
+              break
+
+            case 'appendToFile':
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: await this.appendToMarkdownFile(args.fileName, args.content, 'MCP-User')
+                  }
+                ]
+              }
+              break
+
+            case 'viewFile':
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: await this.viewMarkdownFile(args.fileName)
+                  }
+                ]
+              }
+              break
+
+            case 'createFile':
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: await this.createMarkdownFile(args.fileName, args.content, 'MCP-User')
+                  }
+                ]
+              }
+              break
+
+            case 'deleteLineFromFile':
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: await this.deleteLineFromMarkdownFile(args.fileName, args.lineNumber, 'MCP-User')
                   }
                 ]
               }
