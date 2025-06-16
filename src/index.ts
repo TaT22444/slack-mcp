@@ -2460,6 +2460,7 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     
     return tasks
   }
+  
 
   /**
    * 既存コンテンツからユーザーの前回タスクを取得
