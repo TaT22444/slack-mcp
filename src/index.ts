@@ -2301,9 +2301,14 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         throw new Error(`GitHub API error: ${updateResponse.status}`)
       }
 
+      // キャッシュを無効化（タスク保存後は最新データを取得するため）
+      const cacheKey = `tasks_${userName}`
+      this.taskCache.delete(cacheKey)
+      console.log(`[DEBUG] Cache invalidated for ${userName} after task save`)
+
       // 差分情報を生成
       let changeInfo = ''
-      if (diff.added.length > 0) {
+        if (diff.added.length > 0) {
         changeInfo = `📊 *変更内容:* 🆕追加${diff.added.length}件`
         if (diff.unchanged.length > 0) {
           changeInfo += ` 🔄継続${diff.unchanged.length}件`
