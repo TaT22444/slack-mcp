@@ -47,6 +47,84 @@ npx wrangler deploy
 | `analyzeUserTasks` | ユーザータスク分析 | userName |
 | `getWorkspaceTaskOverview` | ワークスペース概要 | なし |
 | `getCurrentJapanTime` | 現在の日本時間取得 | なし |
+| `searchNotionManual` | Notionマニュアル検索 | query |
+
+## 📚 新機能: Notion連携
+
+### 🎯 概要
+#マニュアルチャンネルで「~~のマニュアル」と投稿すると、Notionからマニュアルページを自動検索して結果を返します。
+
+### 🔍 検索パターン
+以下のパターンでマニュアル検索が自動実行されます：
+- `Slackのマニュアル`
+- `GitHubマニュアル`
+- `マニュアル Cursor`
+- `Cursorの使い方`
+- `Notionについて教えて`
+
+### 📋 検索結果の内容
+- **ページタイトル**: マニュアルページの名前
+- **直接リンク**: Notionページへの直接アクセス
+- **タグ情報**: 関連するタグ
+- **最終更新日**: ページの最終編集日時
+- **内容プレビュー**: 最初のページの内容抜粋（最大10ブロック）
+
+### ⚙️ Notion連携設定
+
+#### 1. Notion Integration作成
+1. [Notion Developers](https://www.notion.com/my-integrations)にアクセス
+2. `+ New integration`をクリック
+3. 統合名を入力し、ワークスペースを選択
+4. `Read content`権限を有効化
+5. `Submit`をクリックして作成
+
+#### 2. Integration Tokenを取得
+- 作成した統合の`Configuration`タブから`Integration Token`をコピー
+
+#### 3. データベースIDを取得
+1. Notionでマニュアル用データベースを開く
+2. 右上の`...`メニューから`Copy link`を選択
+3. URLから32文字のIDを抽出（例：`8935f9d140a04f95a872520c4f123456`）
+
+#### 4. データベースに統合を接続
+1. マニュアルデータベースを開く
+2. 右上の`...`メニューから`+ Add connections`を選択
+3. 作成した統合を検索して接続
+
+#### 5. 環境変数を設定
+```bash
+# Notion関連の環境変数を設定
+npx wrangler secret put NOTION_TOKEN
+npx wrangler secret put NOTION_DATABASE_ID
+```
+
+#### 6. データベース構造
+マニュアルデータベースには以下のプロパティが必要です：
+- **Name** (Title): ページタイトル
+- **Tags** (Multi-select): 検索用タグ（任意）
+- **Last edited time** (Last edited time): 自動設定
+
+### 🎮 使用例
+
+#### Slackでの自動検索
+```
+# #マニュアルチャンネルで投稿
+Slackのマニュアル
+→ Slackに関するマニュアルページを自動検索
+
+Cursorの使い方
+→ Cursorの使い方に関するページを検索
+
+GitHubについて教えて
+→ GitHubに関するマニュアルを検索
+```
+
+#### MCPツールとしての使用
+```
+# CursorやClaude Desktopから
+@noroshi-tasks Slackのマニュアルを検索して
+@noroshi-tasks Notionの使い方を教えて
+```
 
 ## 📊 タスクデータソース
 

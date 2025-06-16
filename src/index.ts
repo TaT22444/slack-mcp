@@ -8,6 +8,8 @@ interface Env {
   GITHUB_TOKEN?: string
   GITHUB_REPO?: string
   GITHUB_OWNER?: string
+  NOTION_TOKEN?: string
+  NOTION_DATABASE_ID?: string
 }
 
 interface SlackChannel {
@@ -84,6 +86,20 @@ interface SlackEventPayload {
   type: string
   event_id: string
   event_time: number
+}
+
+interface NotionPage {
+  id: string
+  title: string
+  url: string
+  content?: string
+  lastEdited: string
+}
+
+interface NotionSearchResult {
+  pages: NotionPage[]
+  totalResults: number
+  searchQuery: string
 }
 
 export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
@@ -577,7 +593,8 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
       const channelMap: Record<string, string> = {
         'C02TJS8D205': 'general',
         'C02TMQRAS3D': 'random',
-        'C091H8NUJ8L': 'タスク'
+        'C091H8NUJ8L': 'タスク',
+        'C091P73EPGS': 'マニュアル'  // #マニュアルチャンネルID（仮）
       }
       return channelMap[channelId] || channelId
     }
@@ -1345,11 +1362,13 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
         })
         
         // #generalチャンネルと#タスクチャンネルのメッセージを処理
-        const targetChannels = ['C02TJS8D205', 'C091H8NUJ8L'] // #general, #タスク
+        const targetChannels = ['C02TJS8D205', 'C091H8NUJ8L', 'C091P73EPGS'] // #general, #タスク, #マニュアル
         if (event.type === 'message' && targetChannels.includes(event.channel) && event.text) {
           console.log('✅ Target channel message detected:', {
             channel: event.channel,
-            channelName: event.channel === 'C02TJS8D205' ? 'general' : 'タスク'
+            channelName: event.channel === 'C02TJS8D205' ? 'general' : 
+                        event.channel === 'C091H8NUJ8L' ? 'タスク' : 
+                        event.channel === 'C091P73EPGS' ? 'マニュアル' : 'unknown'
           })
           
           // ボット自身のメッセージは無視（無限ループ防止）
@@ -1360,11 +1379,16 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
               channel: event.channel
             })
             
-            // タスクパターンの自動転送処理
-            await this.handleTaskMessage(event.text, event.channel, event.user, event.ts)
-            
-            // タスク状況問い合わせ処理
-            await this.handleTaskStatusInquiry(event.text, event.channel, event.ts)
+            // #マニュアルチャンネルでのマニュアル検索処理
+            if (event.channel === 'C091P73EPGS') {
+              await this.handleManualSearchRequest(event.text, event.channel, event.ts)
+            } else {
+              // タスクパターンの自動転送処理
+              await this.handleTaskMessage(event.text, event.channel, event.user, event.ts)
+              
+              // タスク状況問い合わせ処理
+              await this.handleTaskStatusInquiry(event.text, event.channel, event.ts)
+            }
           } else {
             console.log('⚠️ Bot message ignored to prevent infinite loop:', {
               user: event.user,
@@ -1554,6 +1578,18 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
                   },
                   required: ['fileName', 'lineNumber']
                 }
+              },
+              // Notion連携ツール
+              {
+                name: 'searchNotionManual',
+                description: 'Notionからマニュアルページを検索します',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    query: { type: 'string', description: '検索クエリ（マニュアル名やキーワード）' }
+                  },
+                  required: ['query']
+                }
               }
             ]
           }
@@ -1722,6 +1758,18 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
                   {
                     type: 'text',
                     text: await this.deleteLineFromMarkdownFile(args.fileName, args.lineNumber, 'MCP-User')
+                  }
+                ]
+              }
+              break
+
+            // Notion検索ツールのハンドラー
+            case 'searchNotionManual':
+              result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: await this.searchNotionManual(args.query)
                   }
                 ]
               }
@@ -2633,8 +2681,249 @@ export default class NorosiTaskMCP extends WorkerEntrypoint<Env> {
     const channelMap: Record<string, string> = {
       'C02TJS8D205': 'general',
       'C02TMQRAS3D': 'random',
-      'C091H8NUJ8L': 'タスク'
+      'C091H8NUJ8L': 'タスク',
+      'C091P73EPGS': 'マニュアル'  // #マニュアルチャンネルID（仮）
     }
     return channelMap[channelId] || channelId
+  }
+
+  /**
+   * Notionからマニュアルページを検索します
+   * @param query {string} 検索クエリ
+   * @returns {Promise<string>} 検索結果
+   */
+  async searchNotionManual(query: string): Promise<string> {
+    if (!this.env.NOTION_TOKEN || !this.env.NOTION_DATABASE_ID) {
+      return '❌ Notion連携が設定されていません。NOTION_TOKENとNOTION_DATABASE_IDを設定してください。'
+    }
+
+    try {
+      console.log(`[DEBUG] Searching Notion for: ${query}`)
+      
+      // Notion APIでデータベースを検索
+      const response = await fetch(`https://api.notion.com/v1/databases/${this.env.NOTION_DATABASE_ID}/query`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.NOTION_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Notion-Version': '2022-06-28'
+        },
+        body: JSON.stringify({
+          filter: {
+            or: [
+              {
+                property: 'Name',
+                title: {
+                  contains: query
+                }
+              },
+              {
+                property: 'Tags',
+                multi_select: {
+                  contains: query
+                }
+              }
+            ]
+          },
+          sorts: [
+            {
+              property: 'Last edited time',
+              direction: 'descending'
+            }
+          ],
+          page_size: 5
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Notion API error: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json() as {
+        results: Array<{
+          id: string
+          url: string
+          properties: {
+            Name: {
+              title: Array<{ plain_text: string }>
+            }
+            Tags?: {
+              multi_select: Array<{ name: string }>
+            }
+          }
+          last_edited_time: string
+        }>
+      }
+
+      if (data.results.length === 0) {
+        return `📋 「${query}」に関するマニュアルが見つかりませんでした。\n\n💡 検索のヒント:\n・キーワードを変えて試してみてください\n・部分的な単語でも検索できます`
+      }
+
+      // 検索結果をフォーマット
+      let result = `📚 **「${query}」のマニュアル検索結果**\n\n`
+      result += `🔍 **見つかったページ**: ${data.results.length}件\n\n`
+
+      for (let i = 0; i < data.results.length; i++) {
+        const page = data.results[i]
+        const title = page.properties.Name.title[0]?.plain_text || 'タイトルなし'
+        const tags = page.properties.Tags?.multi_select.map(tag => tag.name).join(', ') || ''
+        const lastEdited = new Date(page.last_edited_time).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+        result += `## ${i + 1}. ${title}\n`
+        result += `🔗 **リンク**: ${page.url}\n`
+        if (tags) {
+          result += `🏷️ **タグ**: ${tags}\n`
+        }
+        result += `📅 **最終更新**: ${lastEdited}\n\n`
+
+        // ページの内容を取得（最初のページのみ詳細表示）
+        if (i === 0) {
+          try {
+            const contentResult = await this.getNotionPageContent(page.id)
+            if (contentResult) {
+              result += `📄 **内容プレビュー**:\n${contentResult}\n\n`
+            }
+          } catch (error) {
+            console.error('Error fetching page content:', error)
+          }
+        }
+      }
+
+      result += `\n💡 *データソース: Notion Database*`
+      return result
+
+    } catch (error) {
+      console.error('Error searching Notion:', error)
+      return `❌ Notion検索エラー: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+
+  /**
+   * Notionページの内容を取得します
+   * @param pageId {string} ページID
+   * @returns {Promise<string|null>} ページ内容
+   */
+  private async getNotionPageContent(pageId: string): Promise<string | null> {
+    if (!this.env.NOTION_TOKEN) return null
+
+    try {
+      const response = await fetch(`https://api.notion.com/v1/blocks/${pageId}/children`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.env.NOTION_TOKEN}`,
+          'Notion-Version': '2022-06-28'
+        }
+      })
+
+      if (!response.ok) {
+        return null
+      }
+
+      const data = await response.json() as {
+        results: Array<{
+          type: string
+          paragraph?: {
+            rich_text: Array<{ plain_text: string }>
+          }
+          heading_1?: {
+            rich_text: Array<{ plain_text: string }>
+          }
+          heading_2?: {
+            rich_text: Array<{ plain_text: string }>
+          }
+          heading_3?: {
+            rich_text: Array<{ plain_text: string }>
+          }
+          bulleted_list_item?: {
+            rich_text: Array<{ plain_text: string }>
+          }
+          numbered_list_item?: {
+            rich_text: Array<{ plain_text: string }>
+          }
+        }>
+      }
+
+      let content = ''
+      let blockCount = 0
+      const maxBlocks = 10 // プレビューは最初の10ブロックまで
+
+      for (const block of data.results) {
+        if (blockCount >= maxBlocks) break
+
+        let text = ''
+        if (block.paragraph) {
+          text = block.paragraph.rich_text.map(t => t.plain_text).join('')
+        } else if (block.heading_1) {
+          text = '# ' + block.heading_1.rich_text.map(t => t.plain_text).join('')
+        } else if (block.heading_2) {
+          text = '## ' + block.heading_2.rich_text.map(t => t.plain_text).join('')
+        } else if (block.heading_3) {
+          text = '### ' + block.heading_3.rich_text.map(t => t.plain_text).join('')
+        } else if (block.bulleted_list_item) {
+          text = '• ' + block.bulleted_list_item.rich_text.map(t => t.plain_text).join('')
+        } else if (block.numbered_list_item) {
+          text = `${blockCount + 1}. ` + block.numbered_list_item.rich_text.map(t => t.plain_text).join('')
+        }
+
+        if (text.trim()) {
+          content += text + '\n'
+          blockCount++
+        }
+      }
+
+      return content.trim() || null
+    } catch (error) {
+      console.error('Error fetching page content:', error)
+      return null
+    }
+  }
+
+  /**
+   * マニュアル検索リクエストを処理
+   */
+  private async handleManualSearchRequest(text: string, channel: string, messageTs: string): Promise<void> {
+    // マニュアル検索パターンの正規表現
+    const manualPatterns = [
+      /(.+?)のマニュアル/i,
+      /(.+?)マニュアル/i,
+      /マニュアル\s*(.+)/i,
+      /manual\s*(.+)/i,
+      /(.+?)\s*manual/i,
+      /(.+?)の使い方/i,
+      /(.+?)について教えて/i
+    ]
+
+    let searchQuery: string | null = null
+
+    // パターンマッチングで検索クエリを抽出
+    for (const pattern of manualPatterns) {
+      const match = text.match(pattern)
+      if (match) {
+        searchQuery = match[1].trim()
+        break
+      }
+    }
+
+    if (!searchQuery || searchQuery.length < 2) {
+      return // 検索クエリが短すぎる場合は無視
+    }
+
+    console.log(`[DEBUG] Manual search request: "${searchQuery}"`)
+
+    try {
+      // Notion検索を実行
+      const searchResult = await this.searchNotionManual(searchQuery)
+      
+      // 結果をSlackに投稿
+      await this.postMessage(channel, searchResult, messageTs)
+      
+      // 元のメッセージにリアクションを追加
+      await this.addReaction(channel, messageTs, 'books')
+      
+      console.log(`✅ Manual search completed: query="${searchQuery}", channel=${channel}`)
+    } catch (error) {
+      console.error('❌ Error handling manual search:', error)
+      await this.postMessage(channel, `❌ マニュアル検索中にエラーが発生しました: ${error instanceof Error ? error.message : 'Unknown error'}`, messageTs)
+    }
   }
 }
