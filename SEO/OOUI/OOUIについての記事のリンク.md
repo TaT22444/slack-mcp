@@ -9,3 +9,5 @@
 8. [『オブジェクト指向 UI デザイン』 に書かれていないもの](https://note.com/nikonote/n/n072c5ba6cc4b)
 9. [オブジェクト指向UI（OOUI）とタスク指向UIを解説してみた](https://note.com/designswitch/n/nf996382f1855)
 10. [オブジェクト指向とは。概念、メリット・デメリットを解説！](https://www.miraiserver.ne.jp/column/about_object-orientated/)
+11. [オブジェクト指向UIデザインとは？具体例を交えて専門用語なしで解説](https://www.sejuku.net/blog/245935)
+12. [ノンデザイナーでもできる。直感的で使いやすいUIの設計方法](https://ncdc.co.jp/columns/8938/)
